@@ -1,8 +1,8 @@
-
 import json
 import os
 import queue
 import re
+import sys
 import time
 
 import numpy as np
@@ -20,20 +20,40 @@ except Exception:
 
 
 SAMPLE_RATE = 16000
-CHUNK_SECONDS = 0.25
+CHUNK_SECONDS = 0.20
 COMMAND_WAIT_SECONDS = 3.0
-DUPLICATE_COMMAND_BLOCK_SECONDS = 2.5
-MIN_COMMAND_LENGTH = 2
-MIN_AUDIO_LEVEL = 0.004
+DUPLICATE_COMMAND_BLOCK_SECONDS = 4.0
+MIN_COMMAND_LENGTH = 3
+MIN_AUDIO_LEVEL = 0.012
 
 WAKE_WORDS = ("ассистент", "асистент", "ассистен", "асистен")
 VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "model")
+
+# Для снижения ложных срабатываний лучше оставить False.
+# Если потом захочешь прямые команды без wake word, поставь True.
+ALLOW_DIRECT_COMMANDS_WITHOUT_WAKE_WORD = False
 
 DIRECT_COMMAND_PATTERNS = [
     r"^(?:пожалуйста\s+)?(?:открой|открывай|зайди\s+на|перейди\s+на)\s+.+$",
     r"^(?:пожалуйста\s+)?(?:запусти|запускай)\s+.+$",
     r"^(?:пожалуйста\s+)?(?:найди|поищи|загугли|найди\s+в\s+интернете|поиск)\s+.+$",
 ]
+
+INCOMPLETE_COMMANDS = {
+    "открой",
+    "открывай",
+    "открой сайт",
+    "открой приложение",
+    "открой программу",
+    "открой файл",
+    "открой папку",
+    "запусти",
+    "запускай",
+    "найди",
+    "поищи",
+    "загугли",
+    "поиск",
+}
 
 
 def get_input_devices():
@@ -135,7 +155,7 @@ class VoiceListener(QThread):
         if not os.path.exists(VOSK_MODEL_PATH):
             raise RuntimeError(
                 f"Папка модели Vosk не найдена: {VOSK_MODEL_PATH}\n"
-                f"Скачай русскую модель и распакуй её рядом с проектом."
+                "Скачай русскую модель и распакуй её рядом с проектом."
             )
 
         self.status.emit("Загружаю модель Vosk...")
@@ -164,6 +184,20 @@ class VoiceListener(QThread):
         text = re.sub(r"\s+", " ", text).strip(" ,.!?-:;")
         return text
 
+    def is_complete_command(self, text):
+        cleaned = self.cleanup_command_text(text)
+        if not cleaned or len(cleaned) < MIN_COMMAND_LENGTH:
+            return False
+
+        if cleaned in INCOMPLETE_COMMANDS:
+            return False
+
+        parts = cleaned.split()
+        if len(parts) < 2:
+            return False
+
+        return True
+
     def find_wake_word_match(self, text):
         normalized = self.normalize_recognized_text(text)
 
@@ -182,7 +216,7 @@ class VoiceListener(QThread):
 
     def looks_like_direct_command(self, text):
         cleaned = self.cleanup_command_text(text)
-        if len(cleaned) < MIN_COMMAND_LENGTH:
+        if not self.is_complete_command(cleaned):
             return False
 
         for pattern in DIRECT_COMMAND_PATTERNS:
@@ -192,7 +226,7 @@ class VoiceListener(QThread):
 
     def emit_command_once(self, command):
         command = self.cleanup_command_text(command)
-        if len(command) < MIN_COMMAND_LENGTH:
+        if not self.is_complete_command(command):
             return False
 
         now = time.monotonic()
@@ -238,7 +272,18 @@ class VoiceListener(QThread):
             except queue.Empty:
                 break
 
-    def process_text(self, text, is_final=False):
+    def handle_partial_text(self, text):
+        normalized = self.normalize_recognized_text(text)
+        if not normalized:
+            return
+
+        now = time.monotonic()
+        if normalized != self.last_partial_text or now - self.last_partial_ts > 0.8:
+            self.last_partial_text = normalized
+            self.last_partial_ts = now
+            self.heard_text.emit(normalized)
+
+    def handle_final_text(self, text):
         normalized = self.normalize_recognized_text(text)
         if not normalized:
             return
@@ -264,11 +309,11 @@ class VoiceListener(QThread):
                 return
 
             cleaned = self.cleanup_command_text(normalized)
-            if cleaned and cleaned not in WAKE_WORDS:
+            if self.is_complete_command(cleaned):
                 self.emit_command_once(cleaned)
             return
 
-        if is_final and self.looks_like_direct_command(normalized):
+        if ALLOW_DIRECT_COMMANDS_WITHOUT_WAKE_WORD and self.looks_like_direct_command(normalized):
             self.emit_command_once(normalized)
 
     def run(self):
@@ -282,7 +327,7 @@ class VoiceListener(QThread):
 
             self.status.emit(
                 f"Голосовой режим включён. Частота устройства: {self.device_sample_rate} Hz. "
-                f"Жду фразу '{WAKE_WORDS[0]}' или прямую команду..."
+                f"Жду фразу '{WAKE_WORDS[0]}'..."
             )
 
             self.stream = sd.InputStream(
@@ -320,7 +365,7 @@ class VoiceListener(QThread):
                         result = {}
                     text = (result.get("text") or "").strip()
                     if text:
-                        self.process_text(text, is_final=True)
+                        self.handle_final_text(text)
                     self.last_partial_text = ""
                 else:
                     try:
@@ -328,17 +373,32 @@ class VoiceListener(QThread):
                     except Exception:
                         partial = ""
 
-                    partial = self.normalize_recognized_text(partial)
-                    if not partial:
-                        continue
-
-                    now = time.monotonic()
-                    if partial != self.last_partial_text or now - self.last_partial_ts > 0.6:
-                        self.last_partial_text = partial
-                        self.last_partial_ts = now
-                        self.process_text(partial, is_final=False)
+                    if partial:
+                        self.handle_partial_text(partial)
 
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
             self.stop()
+
+
+if __name__ == "__main__":
+    print("Проверка voice_listener.py")
+    print(f"VOSK_MODEL_PATH = {VOSK_MODEL_PATH}")
+    print("Доступные микрофоны:")
+    for idx, name in get_input_devices():
+        print(f"[{idx}] {name}")
+
+    if not os.path.exists(VOSK_MODEL_PATH):
+        print(f"Ошибка: папка модели не найдена: {VOSK_MODEL_PATH}")
+        sys.exit(1)
+
+    if sd is None:
+        print("Ошибка: не установлен sounddevice")
+        sys.exit(1)
+
+    if vosk is None:
+        print("Ошибка: не установлен vosk")
+        sys.exit(1)
+
+    print("Файл загружается без синтаксических ошибок.")
