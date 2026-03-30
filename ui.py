@@ -1,25 +1,22 @@
-import sqlite3
-from datetime import datetime
-
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSplitter,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from config import APP_NAME, AUTO_START_VOICE, DEFAULT_MODEL, DEFAULT_OLLAMA_URL, DB_PATH
+from config import APP_NAME, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 from storage import (
     create_session,
     ensure_db,
@@ -30,7 +27,7 @@ from storage import (
     save_message,
     set_setting,
 )
-from voice_listener import VoiceListener, get_input_devices, test_microphone_levels
+from voice_assistant import VoiceAssistant
 from worker import AssistantWorker
 
 
@@ -49,390 +46,313 @@ class ChatInput(QTextEdit):
 
 
 class SettingsDialog(QDialog):
-    def __init__(
-        self,
-        parent=None,
-        ollama_model=DEFAULT_MODEL,
-        ollama_url=DEFAULT_OLLAMA_URL,
-        speak=False,
-        input_device=None,
-    ):
+    def __init__(self, parent=None, ollama_model=DEFAULT_MODEL, ollama_url=DEFAULT_OLLAMA_URL):
         super().__init__(parent)
         self.setWindowTitle("Настройки")
-        self.resize(560, 300)
+        self.resize(520, 160)
 
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Модель Ollama:"))
         self.model_edit = QLineEdit(ollama_model)
+        layout.addWidget(self.model_edit)
+
+        layout.addWidget(QLabel("URL Ollama:"))
         self.url_edit = QLineEdit(ollama_url)
-
-        self.speak_checkbox = QCheckBox("Озвучивать ответы")
-        self.speak_checkbox.setChecked(speak)
-
-        self.input_device_combo = QComboBox()
-        self.input_device_combo.addItem("Система по умолчанию", None)
-        for idx, name in get_input_devices():
-            self.input_device_combo.addItem(f"[{idx}] {name}", idx)
-
-        self._set_combo_value(self.input_device_combo, input_device)
-
-        form = QFormLayout()
-        form.addRow("Ollama model:", self.model_edit)
-        form.addRow("Ollama URL:", self.url_edit)
-        form.addRow("Микрофон:", self.input_device_combo)
-        form.addRow("", self.speak_checkbox)
-
-        save_button = QPushButton("Сохранить")
-        save_button.clicked.connect(self.accept)
-
-        test_button = QPushButton("Проверить микрофон")
-        test_button.clicked.connect(self.test_microphone)
+        layout.addWidget(self.url_edit)
 
         buttons = QHBoxLayout()
-        buttons.addWidget(test_button)
-        buttons.addWidget(save_button)
-
-        layout = QVBoxLayout()
-        layout.addLayout(form)
+        self.save_button = QPushButton("Сохранить")
+        self.cancel_button = QPushButton("Отмена")
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.cancel_button)
         layout.addLayout(buttons)
-        self.setLayout(layout)
 
-    def _set_combo_value(self, combo, value):
-        for i in range(combo.count()):
-            if combo.itemData(i) == value:
-                combo.setCurrentIndex(i)
-                return
-        combo.setCurrentIndex(0)
+        self.save_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
 
-    def values(self):
-        return (
-            self.model_edit.text().strip(),
-            self.url_edit.text().strip(),
-            self.speak_checkbox.isChecked(),
-            self.input_device_combo.currentData(),
-        )
-
-    def test_microphone(self):
-        device = self.input_device_combo.currentData()
-        try:
-            mean_level, max_level = test_microphone_levels(device=device, seconds=3)
-
-            if max_level < 0.01:
-                QMessageBox.warning(
-                    self,
-                    "Проверка микрофона",
-                    f"Сигнал почти не слышен.\n\n"
-                    f"Средний уровень: {mean_level:.5f}\n"
-                    f"Максимальный уровень: {max_level:.5f}\n\n"
-                    f"Попробуй выбрать другой микрофон или сказать что-нибудь громче."
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Проверка микрофона",
-                    f"Микрофон работает.\n\n"
-                    f"Средний уровень: {mean_level:.5f}\n"
-                    f"Максимальный уровень: {max_level:.5f}"
-                )
-        except Exception as exc:
-            QMessageBox.critical(
-                self,
-                "Проверка микрофона",
-                f"Не удалось проверить микрофон:\n{exc}"
-            )
+    def get_values(self):
+        return self.model_edit.text().strip(), self.url_edit.text().strip()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
         ensure_db()
 
         self.model_name = get_setting("model_name", DEFAULT_MODEL)
         self.ollama_url = get_setting("ollama_url", DEFAULT_OLLAMA_URL)
-        self.speak_enabled = get_setting("speak_enabled", "0") == "1"
-
-        raw_input_device = get_setting("input_device", "")
-        self.input_device = int(raw_input_device) if raw_input_device not in ("", "None") else None
-
         self.worker = None
-        self.voice_listener = None
-        self.current_session_id = None
+        self.voice_assistant = None
+
+        self.current_assistant_plain = ""
+        self.streaming_in_progress = False
+
+        sessions = list_sessions()
+        if sessions:
+            self.current_session_id = sessions[0][0]
+        else:
+            self.current_session_id = create_session("Основной чат")
 
         self.setWindowTitle(APP_NAME)
-        self.resize(1040, 760)
+        self.resize(1100, 720)
 
         self.build_ui()
-        self.build_menu()
-        self.reload_sessions(select_last=False)
-
-        self.voice_listener = self._make_voice_listener()
-        if AUTO_START_VOICE:
-            self.voice_listener.start()
+        self.refresh_sessions()
+        self.load_current_chat()
 
     def build_ui(self):
-        self.chat_selector = QComboBox()
-        self.chat_selector.currentIndexChanged.connect(self.on_session_changed)
+        root = QWidget()
+        self.setCentralWidget(root)
 
-        self.new_chat_button = QPushButton("Новый сценарий")
+        outer = QHBoxLayout(root)
+        splitter = QSplitter()
+        outer.addWidget(splitter)
+
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+
+        self.new_chat_button = QPushButton("Новый чат")
+        self.settings_button = QPushButton("Настройки")
+        self.voice_button = QPushButton("🎤 Голос: выкл")
+        self.sessions_list = QListWidget()
+
+        left_layout.addWidget(self.new_chat_button)
+        left_layout.addWidget(self.settings_button)
+        left_layout.addWidget(self.voice_button)
+        left_layout.addWidget(self.sessions_list)
+
+        splitter.addWidget(left_widget)
+
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+
+        self.status_label = QLabel("Готово")
+        self.chat_view = QTextBrowser()
+        self.chat_view.setOpenExternalLinks(True)
+
+        input_row = QHBoxLayout()
+        self.input_box = ChatInput()
+        self.input_box.setPlaceholderText("Напиши запрос. Enter — отправить, Shift+Enter — новая строка.")
+        self.send_button = QPushButton("Отправить")
+
+        input_row.addWidget(self.input_box, 1)
+        input_row.addWidget(self.send_button)
+
+        right_layout.addWidget(self.status_label)
+        right_layout.addWidget(self.chat_view, 1)
+        right_layout.addLayout(input_row)
+
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(1, 1)
+
         self.new_chat_button.clicked.connect(self.create_new_chat)
+        self.settings_button.clicked.connect(self.open_settings)
+        self.voice_button.clicked.connect(self.toggle_voice_mode)
+        self.send_button.clicked.connect(self.send_message)
+        self.input_box.send_requested.connect(self.send_message)
+        self.sessions_list.itemClicked.connect(self.on_session_selected)
 
-        self.voice_button = QPushButton("Голос: вкл" if AUTO_START_VOICE else "Голос: выкл")
-        self.voice_button.clicked.connect(self.toggle_voice)
-
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Чат:"))
-        top_row.addWidget(self.chat_selector)
-        top_row.addWidget(self.new_chat_button)
-        top_row.addWidget(self.voice_button)
-
-        self.chat = QTextEdit()
-        self.chat.setReadOnly(True)
-        self.chat.setPlaceholderText("Здесь будет история диалога...")
-
-        self.input = ChatInput()
-        self.input.setPlaceholderText(
-            "Напиши запрос. Например: открой сайт openai, "
-            "запусти блокнот, открой файл report.pdf, "
-            "открой папку Downloads, какая сегодня погода в Хельсинки"
-        )
-        self.input.setFixedHeight(110)
-        self.input.send_requested.connect(self.send_message)
-
-        self.status_label = QLabel("Готов")
-        self.status_label.setAlignment(Qt.AlignLeft)
-
-        send_button = QPushButton("Отправить")
-        send_button.clicked.connect(self.send_message)
-
-        clear_button = QPushButton("Очистить текущий чат")
-        clear_button.clicked.connect(self.clear_chat)
-
-        buttons_row = QHBoxLayout()
-        buttons_row.addWidget(send_button)
-        buttons_row.addWidget(clear_button)
-
-        layout = QVBoxLayout()
-        layout.addLayout(top_row)
-        layout.addWidget(self.chat)
-        layout.addWidget(QLabel("Ввод:"))
-        layout.addWidget(self.input)
-        layout.addLayout(buttons_row)
-        layout.addWidget(self.status_label)
-
-        container = QWidget()
-        container.setLayout(layout)
-        self.setCentralWidget(container)
-
-    def build_menu(self):
-        menu = self.menuBar()
-        settings_menu = menu.addMenu("Настройки")
-
-        settings_action = QAction("Параметры", self)
-        settings_action.triggered.connect(self.open_settings)
-        settings_menu.addAction(settings_action)
-
-    def _make_voice_listener(self):
-        listener = VoiceListener(input_device=self.input_device)
-        listener.heard_command.connect(self.on_voice_command)
-        listener.heard_text.connect(self.on_voice_text)
-        listener.status.connect(self.status_label.setText)
-        listener.failed.connect(self.on_voice_error)
-        return listener
-
-    def reload_sessions(self, select_last=True):
+    def refresh_sessions(self):
+        self.sessions_list.clear()
         sessions = list_sessions()
 
-        self.chat_selector.blockSignals(True)
-        self.chat_selector.clear()
         for session_id, title in sessions:
-            self.chat_selector.addItem(title, session_id)
-        self.chat_selector.blockSignals(False)
+            item = QListWidgetItem(title)
+            item.setData(Qt.UserRole, session_id)
+            self.sessions_list.addItem(item)
 
-        if sessions:
-            if self.current_session_id:
-                index = self.chat_selector.findData(self.current_session_id)
-                if index >= 0:
-                    self.chat_selector.setCurrentIndex(index)
-                elif select_last:
-                    self.chat_selector.setCurrentIndex(len(sessions) - 1)
-                else:
-                    self.chat_selector.setCurrentIndex(0)
-            else:
-                self.chat_selector.setCurrentIndex(len(sessions) - 1 if select_last else 0)
+            if session_id == self.current_session_id:
+                self.sessions_list.setCurrentItem(item)
 
-            self.current_session_id = self.chat_selector.currentData()
-            self.load_history()
-        else:
-            self.current_session_id = None
-            self.chat.clear()
+    def load_current_chat(self):
+        self.chat_view.clear()
+        history = load_session_history(self.current_session_id)
+
+        for role, content, _created_at in history:
+            self.append_message(role, content)
+
+    def _escape_html(self, text):
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br>")
+        )
+
+    def append_message(self, role, content):
+        title = "Ты" if role == "user" else "Ассистент"
+        safe = self._escape_html(content)
+        self.chat_view.append(f"<p><b>{title}:</b><br>{safe}</p>")
+        self.chat_view.verticalScrollBar().setValue(self.chat_view.verticalScrollBar().maximum())
+
+    def start_streaming_assistant_message(self):
+        self.streaming_in_progress = True
+        self.current_assistant_plain = ""
+        self.chat_view.append("<p><b>Ассистент:</b><br></p>")
+
+    def update_streaming_assistant_message(self, chunk):
+        if not self.streaming_in_progress:
+            self.start_streaming_assistant_message()
+
+        self.current_assistant_plain += chunk
+        safe = self._escape_html(self.current_assistant_plain)
+
+        cursor = self.chat_view.textCursor()
+        cursor.movePosition(cursor.End)
+        cursor.select(cursor.BlockUnderCursor)
+        cursor.removeSelectedText()
+        cursor.deletePreviousChar()
+        cursor.insertHtml(f"<p><b>Ассистент:</b><br>{safe}</p>")
+
+        self.chat_view.verticalScrollBar().setValue(self.chat_view.verticalScrollBar().maximum())
+
+    def finish_streaming_assistant_message(self):
+        self.streaming_in_progress = False
 
     def create_new_chat(self):
         self.current_session_id = create_session()
-        self.reload_sessions(select_last=True)
-        self.input.setFocus()
-        self.status_label.setText("Создан новый сценарий")
+        self.refresh_sessions()
+        self.chat_view.clear()
+        self.status_label.setText("Новый чат создан")
 
-    def on_session_changed(self):
-        session_id = self.chat_selector.currentData()
-        if session_id:
-            self.current_session_id = session_id
-            self.load_history()
-
-    def append_chat(self, role, text):
-        if not self.current_session_id:
-            self.current_session_id = create_session()
-
-        time_str = datetime.now().strftime("%H:%M:%S")
-        prefix = "Вы" if role == "user" else "Ассистент"
-
-        safe_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        safe_text = safe_text.replace("\n", "<br>")
-
-        self.chat.append(f"<b>[{time_str}] {prefix}:</b><br>{safe_text}<br>")
-
-        scrollbar = self.chat.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-        save_message(self.current_session_id, role, text)
-
-    def load_history(self):
-        if not self.current_session_id:
-            self.chat.clear()
+    def on_session_selected(self, item):
+        session_id = item.data(Qt.UserRole)
+        if not session_id:
             return
-
-        rows = load_session_history(self.current_session_id, limit=1000)
-        self.chat.clear()
-
-        for role, content, created_at in rows:
-            prefix = "Вы" if role == "user" else "Ассистент"
-            time_str = created_at.split("T")[-1] if "T" in created_at else created_at
-
-            safe_text = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            safe_text = safe_text.replace("\n", "<br>")
-
-            self.chat.append(f"<b>[{time_str}] {prefix}:</b><br>{safe_text}<br>")
-
-        scrollbar = self.chat.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def clear_chat(self):
-        if not self.current_session_id:
-            return
-
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM messages WHERE session_id = ?", (self.current_session_id,))
-        conn.commit()
-        conn.close()
-
-        self.chat.clear()
-        self.status_label.setText("Текущий чат очищен")
+        self.current_session_id = session_id
+        self.load_current_chat()
+        self.status_label.setText("Чат загружен")
 
     def open_settings(self):
-        dlg = SettingsDialog(
+        dialog = SettingsDialog(
             self,
-            self.model_name,
-            self.ollama_url,
-            self.speak_enabled,
-            self.input_device,
+            ollama_model=self.model_name,
+            ollama_url=self.ollama_url,
         )
 
-        if dlg.exec():
-            self.model_name, self.ollama_url, self.speak_enabled, self.input_device = dlg.values()
+        if dialog.exec():
+            model_name, ollama_url = dialog.get_values()
+
+            if not model_name or not ollama_url:
+                QMessageBox.warning(self, "Настройки", "Заполни модель и URL.")
+                return
+
+            self.model_name = model_name
+            self.ollama_url = ollama_url
 
             set_setting("model_name", self.model_name)
             set_setting("ollama_url", self.ollama_url)
-            set_setting("speak_enabled", "1" if self.speak_enabled else "0")
-            set_setting("input_device", "" if self.input_device is None else str(self.input_device))
 
-            if self.voice_listener and self.voice_listener.isRunning():
-                self.voice_listener.stop()
-                self.voice_listener.wait(2000)
-
-            self.voice_listener = self._make_voice_listener()
-            self.voice_listener.start()
-            self.voice_button.setText("Голос: вкл")
-            self.status_label.setText("Настройки сохранены и голос перезапущен")
+            self.status_label.setText("Настройки сохранены")
 
     def send_message(self):
-        if self.worker and self.worker.isRunning():
-            self.status_label.setText("Подожди, предыдущая команда ещё выполняется")
-            return
-
-        if not self.current_session_id:
-            self.create_new_chat()
-
-        text = self.input.toPlainText().strip()
+        text = self.input_box.toPlainText().strip()
         if not text:
-            QMessageBox.information(self, APP_NAME, "Введите запрос.")
             return
 
-        self.input.clear()
-        self.append_chat("user", text)
+        self.send_message_text(text)
+
+    def send_message_text(self, text):
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.information(self, "Подожди", "Предыдущий запрос ещё обрабатывается.")
+            return
 
         rename_session_if_needed(self.current_session_id, text)
-        self.reload_sessions(select_last=False)
+        self.refresh_sessions()
 
-        index = self.chat_selector.findData(self.current_session_id)
-        if index >= 0:
-            self.chat_selector.setCurrentIndex(index)
+        save_message(self.current_session_id, "user", text)
+        self.append_message("user", text)
+        self.input_box.clear()
 
-        self.status_label.setText("Выполняю...")
+        self.status_label.setText("Отправляю запрос...")
 
         self.worker = AssistantWorker(
-            self.current_session_id,
-            text,
-            self.model_name,
-            self.ollama_url,
-            self.speak_enabled,
+            session_id=self.current_session_id,
+            user_text=text,
+            model_name=self.model_name,
+            ollama_url=self.ollama_url,
+            speak_enabled=False,
         )
-        self.worker.status.connect(self.status_label.setText)
-        self.worker.finished_ok.connect(self.on_answer)
-        self.worker.failed.connect(self.on_error)
+        self.worker.status.connect(self.on_worker_status)
+        self.worker.stream_chunk.connect(self.on_worker_stream_chunk)
+        self.worker.finished_ok.connect(self.on_worker_finished)
+        self.worker.failed.connect(self.on_worker_failed)
         self.worker.start()
 
-    def on_answer(self, text):
-        self.append_chat("assistant", text)
-        self.status_label.setText("Готов")
+    def on_worker_status(self, text):
+        self.status_label.setText(text)
+
+    def on_worker_stream_chunk(self, chunk):
+        self.update_streaming_assistant_message(chunk)
+
+    def on_worker_finished(self, answer):
+        if self.streaming_in_progress:
+            self.finish_streaming_assistant_message()
+            final_text = self.current_assistant_plain
+        else:
+            final_text = answer
+            self.append_message("assistant", final_text)
+
+        save_message(self.current_session_id, "assistant", final_text)
+        self.status_label.setText("Готово")
         self.worker = None
 
-    def on_error(self, error_text):
-        self.append_chat("assistant", f"Ошибка: {error_text}")
+    def on_worker_failed(self, error_text):
+        self.streaming_in_progress = False
         self.status_label.setText("Ошибка")
+        QMessageBox.critical(self, "Ошибка", error_text)
         self.worker = None
 
-    def toggle_voice(self):
-        if self.voice_listener and self.voice_listener.isRunning():
-            self.voice_button.setEnabled(False)
-            self.voice_button.setText("Голос: выключается...")
-            self.voice_listener.stop()
-            self.voice_listener.wait(2000)
-            self.voice_listener = self._make_voice_listener()
-            self.voice_button.setEnabled(True)
-            self.voice_button.setText("Голос: выкл")
+    def toggle_voice_mode(self):
+        if self.voice_assistant and self.voice_assistant.isRunning():
+            self.voice_assistant.stop()
+            self.voice_assistant.wait()
+            self.voice_assistant = None
+            self.voice_button.setText("🎤 Голос: выкл")
             self.status_label.setText("Голосовой режим выключен")
             return
 
-        self.voice_listener = self._make_voice_listener()
-        self.voice_listener.start()
-        self.voice_button.setText("Голос: вкл")
-        self.status_label.setText("Голосовой режим включён")
+        self.voice_assistant = VoiceAssistant(
+            session_id=self.current_session_id,
+            ollama_url=self.ollama_url,
+            model_name=self.model_name,
+        )
+        self.voice_assistant.status.connect(self.on_voice_status)
+        self.voice_assistant.error.connect(self.on_voice_error)
+        self.voice_assistant.recognized_text.connect(self.on_voice_recognized)
+        self.voice_assistant.assistant_text.connect(self.on_voice_answer)
+        self.voice_assistant.start()
 
-    def on_voice_command(self, text):
-        if self.worker and self.worker.isRunning():
-            self.status_label.setText("Команда услышана, но ассистент ещё занят")
-            return
+        self.voice_button.setText("🎤 Голос: вкл")
+        self.status_label.setText("Запускаю голосовой режим...")
 
-        self.input.setPlainText(text)
-        self.send_message()
+    def on_voice_status(self, text):
+        self.status_label.setText(text)
 
-    def on_voice_text(self, text):
-        self.status_label.setText(f"Слышу: {text}")
+    def on_voice_error(self, text):
+        QMessageBox.critical(self, "Голосовой режим", text)
+        self.status_label.setText("Ошибка голосового режима")
+        if self.voice_assistant:
+            self.voice_assistant.stop()
+            self.voice_assistant = None
+        self.voice_button.setText("🎤 Голос: выкл")
 
-    def on_voice_error(self, error_text):
-        self.voice_button.setText("Голос: выкл")
-        self.status_label.setText(f"Ошибка голоса: {error_text}")
-        QMessageBox.warning(self, APP_NAME, f"Ошибка голосового режима:\n{error_text}")
+    def on_voice_recognized(self, text):
+        save_message(self.current_session_id, "user", text)
+        self.append_message("user", text)
+        rename_session_if_needed(self.current_session_id, text)
+        self.refresh_sessions()
+
+    def on_voice_answer(self, text):
+        save_message(self.current_session_id, "assistant", text)
+        self.append_message("assistant", text)
 
     def closeEvent(self, event):
-        if self.voice_listener and self.voice_listener.isRunning():
-            self.voice_listener.stop()
-            self.voice_listener.wait(1500)
-        event.accept()
+        if self.voice_assistant and self.voice_assistant.isRunning():
+            self.voice_assistant.stop()
+            self.voice_assistant.wait()
+        if self.worker and self.worker.isRunning():
+            self.worker.wait()
+        super().closeEvent(event)
