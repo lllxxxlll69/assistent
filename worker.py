@@ -15,6 +15,13 @@ from storage import get_recent_messages
 from tools import ToolManager
 
 logger = logging.getLogger(__name__)
+ACTION_TOOLS = {
+    "open_site",
+    "open_app",
+    "open_file",
+    "open_folder",
+    "open_search_in_browser",
+}
 
 
 class AssistantWorker(QThread):
@@ -364,17 +371,23 @@ class AssistantWorker(QThread):
                 continue
 
             tool_name = tool_call["name"]
+
+            if tool_name in ACTION_TOOLS:
+                messages.append({"role": "assistant", "content": answer})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Нельзя вызывать инструменты открытия сайтов, приложений, файлов, папок или браузерного поиска, "
+                            "если пользователь не дал явную команду на открытие. "
+                            "Ответь пользователю обычным текстом без tool_call."
+                        ),
+                    }
+                )
+                continue
+
             self.status.emit(f"Вызываю инструмент: {tool_name}")
             result = self.tool_manager.execute(tool_name, tool_call["arguments"])
-
-            if tool_name in {
-                "open_site",
-                "open_app",
-                "open_file",
-                "open_folder",
-                "open_search_in_browser",
-            }:
-                return result
 
             messages.append({"role": "assistant", "content": answer})
             messages.append(

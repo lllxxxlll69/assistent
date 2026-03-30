@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self.ollama_url = get_setting("ollama_url", DEFAULT_OLLAMA_URL)
         self.worker = None
         self.voice_assistant = None
+        self.voice_stop_in_progress = False
 
         self.current_assistant_plain = ""
         self.streaming_in_progress = False
@@ -200,8 +202,8 @@ class MainWindow(QMainWindow):
         safe = self._escape_html(self.current_assistant_plain)
 
         cursor = self.chat_view.textCursor()
-        cursor.movePosition(cursor.End)
-        cursor.select(cursor.BlockUnderCursor)
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
         cursor.removeSelectedText()
         cursor.deletePreviousChar()
         cursor.insertHtml(f"<p><b>Ассистент:</b><br>{safe}</p>")
@@ -306,14 +308,19 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     def toggle_voice_mode(self):
-        if self.voice_assistant and self.voice_assistant.isRunning():
+        if self.voice_assistant is not None and self.voice_assistant.isRunning():
+            self.voice_stop_in_progress = True
+            self.voice_button.setEnabled(False)
+            self.voice_button.setText("🎤 Голос: выключается...")
+            self.status_label.setText("Останавливаю голосовой режим...")
             self.voice_assistant.stop()
-            self.voice_assistant.wait()
-            self.voice_assistant = None
-            self.voice_button.setText("🎤 Голос: выкл")
-            self.status_label.setText("Голосовой режим выключен")
             return
 
+        if self.voice_assistant is not None:
+            self.voice_assistant.deleteLater()
+            self.voice_assistant = None
+
+        self.voice_stop_in_progress = False
         self.voice_assistant = VoiceAssistant(
             session_id=self.current_session_id,
             ollama_url=self.ollama_url,
@@ -323,8 +330,10 @@ class MainWindow(QMainWindow):
         self.voice_assistant.error.connect(self.on_voice_error)
         self.voice_assistant.recognized_text.connect(self.on_voice_recognized)
         self.voice_assistant.assistant_text.connect(self.on_voice_answer)
+        self.voice_assistant.finished.connect(self.on_voice_thread_finished)
         self.voice_assistant.start()
 
+        self.voice_button.setEnabled(True)
         self.voice_button.setText("🎤 Голос: вкл")
         self.status_label.setText("Запускаю голосовой режим...")
 
@@ -334,10 +343,26 @@ class MainWindow(QMainWindow):
     def on_voice_error(self, text):
         QMessageBox.critical(self, "Голосовой режим", text)
         self.status_label.setText("Ошибка голосового режима")
+        self.voice_stop_in_progress = True
         if self.voice_assistant:
             self.voice_assistant.stop()
-            self.voice_assistant = None
+        self.voice_button.setEnabled(True)
         self.voice_button.setText("🎤 Голос: выкл")
+
+    def on_voice_thread_finished(self):
+        if self.voice_assistant:
+            self.voice_assistant.deleteLater()
+            self.voice_assistant = None
+
+        self.voice_button.setEnabled(True)
+        self.voice_button.setText("🎤 Голос: выкл")
+
+        if self.voice_stop_in_progress:
+            self.status_label.setText("Голосовой режим выключен")
+        elif self.status_label.text() == "Запускаю голосовой режим...":
+            self.status_label.setText("Голосовой режим выключен")
+
+        self.voice_stop_in_progress = False
 
     def on_voice_recognized(self, text):
         save_message(self.current_session_id, "user", text)

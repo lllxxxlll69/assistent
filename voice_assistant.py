@@ -26,6 +26,13 @@ SAMPLE_RATE = 16000
 TTS_SAMPLE_RATE = 48000
 SPEAKER = "baya"
 MODEL_PATH = "model"
+ACTION_TOOLS = {
+    "open_site",
+    "open_app",
+    "open_file",
+    "open_folder",
+    "open_search_in_browser",
+}
 
 
 class VoiceAssistant(QThread):
@@ -58,11 +65,21 @@ class VoiceAssistant(QThread):
         self.vosk_model = None
         self.rec = None
         self.tool_manager = ToolManager(status_callback=self.status.emit)
+        self.model_path = os.environ.get("VOSK_MODEL_PATH", MODEL_PATH)
 
     def stop(self):
         self._running = False
+        self.requestInterruption()
+        try:
+            self.audio_queue.put_nowait(None)
+        except Exception:
+            pass
         try:
             sd.stop()
+        except Exception:
+            pass
+        try:
+            self.http.close()
         except Exception:
             pass
 
@@ -103,12 +120,12 @@ class VoiceAssistant(QThread):
 
     def init_vosk(self):
         self.status.emit("Загружаю распознавание...")
-        if not os.path.exists(MODEL_PATH):
+        if not os.path.exists(self.model_path):
             raise FileNotFoundError(
-                f"Папка модели Vosk '{MODEL_PATH}' не найдена. "
+                f"Папка модели Vosk '{self.model_path}' не найдена. "
                 f"Положи туда локальную модель Vosk."
             )
-        self.vosk_model = vosk.Model(MODEL_PATH)
+        self.vosk_model = vosk.Model(self.model_path)
         self.rec = vosk.KaldiRecognizer(self.vosk_model, SAMPLE_RATE)
 
     def warmup_ollama(self):
@@ -137,7 +154,7 @@ class VoiceAssistant(QThread):
         clean_text = re.sub(r"[*_#`]", "", text)
         clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
-        if not clean_text:
+        if not clean_text or not self._running:
             return
 
         if len(clean_text) > 600:
@@ -227,6 +244,9 @@ class VoiceAssistant(QThread):
 
                 # sounddevice стабильнее принимает 2D массив (frames, channels)
                 playback_audio = full_audio.reshape(-1, 1)
+
+                if not self._running:
+                    return
 
                 sd.play(playback_audio, samplerate=TTS_SAMPLE_RATE, blocking=True)
 
@@ -550,17 +570,23 @@ class VoiceAssistant(QThread):
                 continue
 
             tool_name = tool_call["name"]
+
+            if tool_name in ACTION_TOOLS:
+                messages.append({"role": "assistant", "content": answer})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Нельзя вызывать инструменты открытия сайтов, приложений, файлов, папок или браузерного поиска, "
+                            "если пользователь не дал явную команду на открытие. "
+                            "Ответь пользователю обычным текстом без tool_call."
+                        ),
+                    }
+                )
+                continue
+
             self.status.emit(f"Вызываю инструмент: {tool_name}")
             result = self.tool_manager.execute(tool_name, tool_call["arguments"])
-
-            if tool_name in {
-                "open_site",
-                "open_app",
-                "open_file",
-                "open_folder",
-                "open_search_in_browser",
-            }:
-                return result
 
             messages.append({"role": "assistant", "content": answer})
             messages.append(
