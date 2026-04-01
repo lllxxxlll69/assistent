@@ -7,7 +7,6 @@ from config import DB_PATH
 
 def ensure_db():
     conn = sqlite3.connect(DB_PATH)
-
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -17,7 +16,6 @@ def ensure_db():
         )
         """
     )
-
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS messages (
@@ -30,7 +28,6 @@ def ensure_db():
         )
         """
     )
-
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -39,7 +36,6 @@ def ensure_db():
         )
         """
     )
-
     conn.commit()
 
     row = conn.execute("SELECT id FROM chat_sessions LIMIT 1").fetchone()
@@ -56,7 +52,10 @@ def ensure_db():
 
 def get_setting(key, default=""):
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?",
+        (key,),
+    ).fetchone()
     conn.close()
     return row[0] if row else default
 
@@ -65,7 +64,8 @@ def set_setting(key, value):
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """
-        INSERT INTO app_settings(key, value) VALUES (?, ?)
+        INSERT INTO app_settings(key, value)
+        VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """,
         (key, str(value)),
@@ -87,6 +87,7 @@ def create_session(title=None):
     session_id = str(uuid.uuid4())
     if not title:
         title = f"Сценарий {datetime.now().strftime('%H:%M:%S')}"
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "INSERT INTO chat_sessions(id, title, created_at) VALUES (?, ?, ?)",
@@ -99,12 +100,46 @@ def create_session(title=None):
 
 def rename_session_if_needed(session_id, first_user_text):
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT title FROM chat_sessions WHERE id = ?", (session_id,)).fetchone()
+    row = conn.execute(
+        "SELECT title FROM chat_sessions WHERE id = ?",
+        (session_id,),
+    ).fetchone()
+
     if row and row[0].startswith("Сценарий "):
         title = first_user_text.strip()[:40] or row[0]
-        conn.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+        conn.execute(
+            "UPDATE chat_sessions SET title = ? WHERE id = ?",
+            (title, session_id),
+        )
         conn.commit()
+
     conn.close()
+
+
+def rename_session(session_id, new_title):
+    title = (new_title or "").strip()
+    if not title:
+        return False
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE chat_sessions SET title = ? WHERE id = ?",
+        (title[:80], session_id),
+    )
+    conn.commit()
+    changed = conn.total_changes > 0
+    conn.close()
+    return changed
+
+
+def delete_session(session_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+    conn.commit()
+    deleted = conn.total_changes > 0
+    conn.close()
+    return deleted
 
 
 def save_message(session_id, role, content):
@@ -120,7 +155,13 @@ def save_message(session_id, role, content):
 def load_session_history(session_id, limit=1000):
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?",
+        """
+        SELECT role, content, created_at
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY id ASC
+        LIMIT ?
+        """,
         (session_id, limit),
     ).fetchall()
     conn.close()
@@ -130,7 +171,13 @@ def load_session_history(session_id, limit=1000):
 def get_recent_messages(session_id, limit=120):
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+        """
+        SELECT role, content
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
         (session_id, limit),
     ).fetchall()
     conn.close()

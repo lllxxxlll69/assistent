@@ -6,16 +6,19 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -23,10 +26,12 @@ from PySide6.QtWidgets import (
 from config import APP_NAME, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 from storage import (
     create_session,
+    delete_session,
     ensure_db,
     get_setting,
     list_sessions,
     load_session_history,
+    rename_session,
     rename_session_if_needed,
     save_message,
     set_setting,
@@ -219,6 +224,51 @@ class ChatView(QWidget):
     def scroll_to_bottom(self):
         bar = self.scroll_area.verticalScrollBar()
         bar.setValue(bar.maximum())
+
+
+class SessionItemWidget(QWidget):
+    rename_requested = Signal(str)
+    delete_requested = Signal(str)
+    clicked = Signal(str)
+
+    def __init__(self, session_id: str, title: str, parent=None):
+        super().__init__(parent)
+        self.session_id = session_id
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        self.title_label = QLabel(title)
+        self.title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.title_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.title_label.setStyleSheet("background: transparent;")
+
+        self.menu_button = QToolButton()
+        self.menu_button.setText("⋯")
+        self.menu_button.setCursor(Qt.PointingHandCursor)
+        self.menu_button.setObjectName("sessionMenuButton")
+        self.menu_button.setFixedSize(26, 26)
+        self.menu_button.clicked.connect(self.show_menu)
+
+        layout.addWidget(self.title_label, 1)
+        layout.addWidget(self.menu_button, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+    def mousePressEvent(self, event):
+        if not self.menu_button.geometry().contains(event.pos()):
+            self.clicked.emit(self.session_id)
+        super().mousePressEvent(event)
+
+    def show_menu(self):
+        menu = QMenu(self)
+        rename_action = menu.addAction("Переименовать")
+        delete_action = menu.addAction("Удалить")
+
+        action = menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
+        if action == rename_action:
+            self.rename_requested.emit(self.session_id)
+        elif action == delete_action:
+            self.delete_requested.emit(self.session_id)
 
 
 class SettingsDialog(QDialog):
@@ -488,7 +538,7 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 border-radius: 6px;
-                padding: 8px 6px;
+                padding: 4px;
                 margin: 2px;
             }}
 
@@ -498,6 +548,40 @@ class MainWindow(QMainWindow):
             }}
 
             QListWidget#sessionsList::item:hover {{
+                background-color: {COLORS["bg_block"]};
+            }}
+
+            QToolButton#sessionMenuButton {{
+                background-color: transparent;
+                color: {COLORS["text"]};
+                border: none;
+                border-radius: 6px;
+                font-size: 18px;
+                padding: 0px;
+            }}
+
+            QToolButton#sessionMenuButton:hover {{
+                background-color: #4A4A4A;
+            }}
+
+            QToolButton#sessionMenuButton:pressed {{
+                background-color: #5A5A5A;
+            }}
+
+            QMenu {{
+                background-color: {COLORS["bg_panel"]};
+                color: {COLORS["text"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 8px;
+                padding: 6px;
+            }}
+
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: 6px;
+            }}
+
+            QMenu::item:selected {{
                 background-color: {COLORS["bg_block"]};
             }}
 
@@ -580,12 +664,34 @@ class MainWindow(QMainWindow):
         sessions = list_sessions()
 
         for session_id, title in sessions:
-            item = QListWidgetItem(title)
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, session_id)
+
+            widget = SessionItemWidget(session_id, title)
+            widget.clicked.connect(self.select_session_by_id)
+            widget.rename_requested.connect(self.rename_chat)
+            widget.delete_requested.connect(self.delete_chat)
+
+            item.setSizeHint(widget.sizeHint())
             self.sessions_list.addItem(item)
+            self.sessions_list.setItemWidget(item, widget)
 
             if session_id == self.current_session_id:
                 self.sessions_list.setCurrentItem(item)
+
+    def select_session_by_id(self, session_id: str):
+        if not session_id:
+            return
+
+        self.current_session_id = session_id
+        self.load_current_chat()
+        self.status_label.setText("Чат загружен")
+
+        for i in range(self.sessions_list.count()):
+            item = self.sessions_list.item(i)
+            if item.data(Qt.UserRole) == session_id:
+                self.sessions_list.setCurrentItem(item)
+                break
 
     def load_current_chat(self):
         self.chat_view.clear_messages()
@@ -625,10 +731,54 @@ class MainWindow(QMainWindow):
         session_id = item.data(Qt.UserRole)
         if not session_id:
             return
+        self.select_session_by_id(session_id)
 
-        self.current_session_id = session_id
+    def rename_chat(self, session_id: str):
+        sessions = dict(list_sessions())
+        current_title = sessions.get(session_id, "")
+
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Переименовать чат",
+            "Новое название:",
+            text=current_title,
+        )
+
+        if not ok:
+            return
+
+        new_title = new_title.strip()
+        if not new_title:
+            QMessageBox.warning(self, "Переименование", "Название не должно быть пустым.")
+            return
+
+        if rename_session(session_id, new_title):
+            self.refresh_sessions()
+            self.status_label.setText("Чат переименован")
+
+    def delete_chat(self, session_id: str):
+        answer = QMessageBox.question(
+            self,
+            "Удаление чата",
+            "Удалить этот чат вместе со всей историей?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        was_current = session_id == self.current_session_id
+        delete_session(session_id)
+
+        sessions_after = list_sessions()
+        if not sessions_after:
+            self.current_session_id = create_session("Основной чат")
+        elif was_current:
+            self.current_session_id = sessions_after[0][0]
+
+        self.refresh_sessions()
         self.load_current_chat()
-        self.status_label.setText("Чат загружен")
+        self.status_label.setText("Чат удалён")
 
     def open_settings(self):
         dialog = SettingsDialog(
