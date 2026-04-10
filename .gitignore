@@ -1,0 +1,7 @@
+.assistant_data/
+.venv/
+__pycache__/
+logs/
+model/
+assistant_history.db
+tmp_assistant_demo/
