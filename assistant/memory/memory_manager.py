@@ -32,12 +32,15 @@ class MemoryManager:
 
     def get_context(self) -> list[Message]:
         settings = self.settings_manager.get_settings()
-        tail = self.get_current_session().messages[-settings.memory_length :]
+        session = self.get_current_session()
+        summary = [message for message in session.messages if message.role == "system"][-1:]
+        tail = [message for message in session.messages if message.role != "system"][-settings.memory_length :]
+        combined = [*summary, *tail]
         token_budget = settings.memory_max_tokens
         collected: list[Message] = []
         current_tokens = 0
 
-        for item in reversed(tail):
+        for item in reversed(combined):
             estimated = self._estimate_tokens(item.content)
             if current_tokens + estimated > token_budget:
                 break
@@ -47,17 +50,17 @@ class MemoryManager:
         return list(reversed(collected))
 
     def summarize_context(self) -> str:
-        history = self.get_current_session().messages
+        history = [message for message in self.get_current_session().messages if message.role != "system"]
         if not history:
             return ""
 
         summary_source = history[:-8] if len(history) > 8 else history
         summary_lines: list[str] = []
         for message in summary_source:
-            role = "User" if message.role == "user" else "Assistant"
+            role = "Пользователь" if message.role == "user" else "Ассистент"
             summary_lines.append(f"{role}: {message.content[:240]}")
         summary = "\n".join(summary_lines)
-        return f"Conversation summary:\n{summary}"
+        return f"Сводка диалога:\n{summary}"
 
     def get_all_messages(self, *, include_system: bool = False) -> list[Message]:
         messages = self.get_current_session().messages
@@ -87,11 +90,12 @@ class MemoryManager:
             reverse=True,
         )
 
-    def create_session(self, title: str | None = None) -> ChatSession:
+    def create_session(self, title: str | None = None, assistant_mode: str | None = None) -> ChatSession:
         session_number = len(self._sessions) + 1
         session = ChatSession(
             id=str(uuid.uuid4()),
             title=title or f"Новый чат {session_number}",
+            assistant_mode=self._normalize_assistant_mode(assistant_mode or self._default_assistant_mode()),
         )
         self._sessions[session.id] = session
         self._active_session_id = session.id
@@ -134,6 +138,21 @@ class MemoryManager:
     def get_active_session_id(self) -> str:
         return self.get_current_session().id
 
+    def get_active_session_mode(self) -> str:
+        return self._normalize_assistant_mode(self.get_current_session().assistant_mode)
+
+    def set_session_mode(self, session_id: str, assistant_mode: str) -> bool:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return False
+        normalized = self._normalize_assistant_mode(assistant_mode)
+        if session.assistant_mode == normalized:
+            return True
+        session.assistant_mode = normalized
+        session.updated_at = utc_now_iso()
+        self._save()
+        return True
+
     def get_current_session(self) -> ChatSession:
         if not self._sessions:
             return self.create_session()
@@ -143,12 +162,14 @@ class MemoryManager:
 
     def _shrink_if_needed(self, session: ChatSession) -> None:
         settings = self.settings_manager.get_settings()
-        if len(session.messages) <= settings.memory_length * 2:
+        visible_messages = [message for message in session.messages if message.role != "system"]
+        if len(visible_messages) <= settings.memory_length * 2:
             return
 
-        summary = self.summarize_context()
-        recent_tail = session.messages[-settings.memory_length :]
-        session.messages = [Message(role="system", content=summary), *recent_tail]
+        summary_source = visible_messages[:-settings.memory_length]
+        recent_tail = visible_messages[-settings.memory_length :]
+        summary = self._build_summary(summary_source)
+        session.messages = [Message(role="system", content=summary), *recent_tail] if summary else list(recent_tail)
 
     def _estimate_tokens(self, text: str) -> int:
         return max(1, len(text) // 4)
@@ -158,12 +179,25 @@ class MemoryManager:
             self.create_session()
             return
 
-        payload = json.loads(self.history_path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(self.history_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            corrupt_backup = self.history_path.with_suffix(".corrupt.json")
+            try:
+                if self.history_path.exists():
+                    self.history_path.replace(corrupt_backup)
+            except OSError:
+                pass
+            self._sessions = {}
+            self._active_session_id = None
+            self.create_session()
+            return
 
         if isinstance(payload, list):
             session = ChatSession(
                 id=str(uuid.uuid4()),
                 title="Новый чат 1",
+                assistant_mode=self._default_assistant_mode(),
                 messages=[Message(**item) for item in payload],
             )
             self._sessions = {session.id: session}
@@ -177,6 +211,7 @@ class MemoryManager:
             session = ChatSession(
                 id=item["id"],
                 title=item["title"],
+                assistant_mode=self._normalize_assistant_mode(item.get("assistant_mode")),
                 created_at=item.get("created_at", utc_now_iso()),
                 updated_at=item.get("updated_at", utc_now_iso()),
                 messages=messages,
@@ -195,10 +230,12 @@ class MemoryManager:
             "active_session_id": self._active_session_id,
             "sessions": [session.to_dict() for session in self.list_sessions()],
         }
-        self.history_path.write_text(
+        temp_path = self.history_path.with_suffix(".tmp")
+        temp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        temp_path.replace(self.history_path)
 
     def _should_autorename(self, session: ChatSession) -> bool:
         default_prefix = "Новый чат"
@@ -207,3 +244,22 @@ class MemoryManager:
     def _generate_title(self, content: str) -> str:
         title = " ".join(content.split())
         return (title[:50] or "Новый чат").strip()
+
+    def _build_summary(self, messages: list[Message]) -> str:
+        if not messages:
+            return ""
+        summary_lines: list[str] = []
+        for message in messages:
+            role = "Пользователь" if message.role == "user" else "Ассистент"
+            summary_lines.append(f"{role}: {message.content[:240]}")
+        return "Сводка диалога:\n" + "\n".join(summary_lines)
+
+    def _default_assistant_mode(self) -> str:
+        profile = self.settings_manager.get_settings().assistant_profile
+        return self._normalize_assistant_mode(profile)
+
+    def _normalize_assistant_mode(self, assistant_mode: str | None) -> str:
+        normalized = (assistant_mode or "").strip().lower()
+        if normalized in {"chat", "assistant", "general", "default"}:
+            return "chat"
+        return "localscript"

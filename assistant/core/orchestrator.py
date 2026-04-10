@@ -8,6 +8,7 @@ from assistant.config.settings import SettingsManager
 from assistant.core.agent import Agent
 from assistant.llm.client import LLMClient
 from assistant.llm.prompts import build_auto_mode_prompt, build_chat_messages, build_system_prompt
+from assistant.localscript.service import LocalScriptService
 from assistant.memory.memory_manager import MemoryManager
 from assistant.models import (
     ActionLogEntry,
@@ -31,6 +32,7 @@ class Orchestrator:
         file_tools: FileTools,
         vision_tools: VisionTools,
         search_tools: SearchTools,
+        localscript_service: LocalScriptService,
     ) -> None:
         self.agent = agent
         self.settings_manager = settings_manager
@@ -39,15 +41,17 @@ class Orchestrator:
         self.file_tools = file_tools
         self.vision_tools = vision_tools
         self.search_tools = search_tools
+        self.localscript_service = localscript_service
         self.request_count = 0
 
-    async def handle(self, user_input: str) -> AssistantResponse:
-        return await self.handle_with_callbacks(user_input)
+    async def handle(self, user_input: str, *, assistant_profile: str | None = None) -> AssistantResponse:
+        return await self.handle_with_callbacks(user_input, assistant_profile=assistant_profile)
 
     async def handle_with_callbacks(
         self,
         user_input: str,
         on_text_chunk: Callable[[str], None] | None = None,
+        assistant_profile: str | None = None,
     ) -> AssistantResponse:
         self.request_count += 1
         self.memory_manager.add_message("user", user_input)
@@ -68,7 +72,7 @@ class Orchestrator:
             if not content:
                 content = await asyncio.to_thread(
                     self._generate_text_response,
-                    f"Write updated file content for {action.target_path} based on: {user_input}",
+                    f"Подготовь обновленное содержимое файла {action.target_path} на основе запроса: {user_input}",
                     [],
                 )
             result = await asyncio.to_thread(self.file_tools.edit_file, action.target_path, content)
@@ -84,6 +88,7 @@ class Orchestrator:
                 VisionRequest(image_path=action.image_path, prompt=user_input),
             )
             logs.append(ActionLogEntry(message=f"Analyzed image {action.image_path}"))
+            logs[-1].message = f"Проанализировано изображение {action.image_path}"
             details = "\n".join(f"- {item}" for item in vision_result.details)
             text = vision_result.summary if not details else f"{vision_result.summary}\n{details}"
             return self._finalize_response(text, logs)
@@ -92,15 +97,82 @@ class Orchestrator:
             result = await asyncio.to_thread(self.search_tools.search_local_files, action.search_query)
             retrieval_chunks = [RetrievalChunk(**item) for item in result.structured_data.get("chunks", [])]
             logs.extend(result.logs)
+            if self._should_use_localscript_pipeline(user_input, assistant_profile=assistant_profile):
+                generation = await asyncio.to_thread(
+                    self.localscript_service.generate,
+                    user_input,
+                    context_messages=self.memory_manager.get_context(),
+                )
+                logs.extend(generation.logs)
+                logs.extend(self._validation_logs(generation.validation.is_valid, generation.validation.issues))
+                return self._finalize_response(
+                    generation.code,
+                    logs,
+                    extra_metrics={
+                        "validation_checks": len(generation.validation.checks),
+                        "validation_errors": len(generation.validation.issues),
+                        "candidate_count": generation.candidate_count,
+                        "selected_strategy": generation.selected_strategy,
+                    },
+                )
+
             answer = await self._generate_user_visible_response(user_input, retrieval_chunks, on_text_chunk)
-            logs.append(ActionLogEntry(message="Generated response using local search context"))
+            logs.append(ActionLogEntry(message="Сформирован ответ с учетом локального поиска"))
             return self._finalize_response(answer, logs)
 
         if action.action_type == ActionType.AUTO:
-            return await self._run_auto_mode(user_input)
+            return await self._run_auto_mode(user_input, assistant_profile=assistant_profile)
+
+        if self._should_use_localscript_pipeline(user_input, assistant_profile=assistant_profile):
+            return await self.generate_localscript_response(
+                user_input,
+                allow_clarification=True,
+                persist_memory=True,
+                user_already_recorded=True,
+                use_memory_context=True,
+                count_request=False,
+            )
 
         answer = await self._generate_user_visible_response(user_input, [], on_text_chunk)
         return self._finalize_response(answer, logs)
+
+    async def generate_localscript_response(
+        self,
+        user_input: str,
+        *,
+        allow_clarification: bool = False,
+        persist_memory: bool = False,
+        user_already_recorded: bool = False,
+        use_memory_context: bool = False,
+        count_request: bool = True,
+    ) -> AssistantResponse:
+        if count_request:
+            self.request_count += 1
+
+        if persist_memory and not user_already_recorded:
+            self.memory_manager.add_message("user", user_input)
+
+        context_messages = self.memory_manager.get_context() if use_memory_context else []
+        generation = await asyncio.to_thread(
+            self.localscript_service.generate,
+            user_input,
+            context_messages=context_messages,
+            allow_clarification=allow_clarification,
+        )
+        logs = list(generation.logs)
+        logs.extend(self._validation_logs(generation.validation.is_valid, generation.validation.issues))
+        text = generation.clarification_question or generation.code
+        return self._finalize_response(
+            text,
+            logs,
+            persist_memory=persist_memory,
+            extra_metrics={
+                "validation_checks": len(generation.validation.checks),
+                "validation_errors": len(generation.validation.issues),
+                "candidate_count": generation.candidate_count,
+                "selected_strategy": generation.selected_strategy,
+            },
+        )
 
     def _generate_text_response(self, user_input: str, retrieval_chunks: list[RetrievalChunk]) -> str:
         settings = self.settings_manager.get_settings()
@@ -138,9 +210,9 @@ class Orchestrator:
         ):
             chunks.append(chunk)
             on_text_chunk(chunk)
-        answer = "".join(chunks).strip()
-        if not answer:
-            raise RuntimeError("Model returned an empty streamed response.")
+        answer = "".join(chunks)
+        if not answer.strip():
+            raise RuntimeError("Модель вернула пустой потоковый ответ.")
         return answer
 
     async def _generate_user_visible_response(
@@ -159,12 +231,33 @@ class Orchestrator:
             )
         return await asyncio.to_thread(self._generate_text_response, user_input, retrieval_chunks)
 
-    async def _run_auto_mode(self, task: str) -> AssistantResponse:
+    async def _run_auto_mode(self, task: str, *, assistant_profile: str | None = None) -> AssistantResponse:
+        if self._should_use_localscript_pipeline(task, assistant_profile=assistant_profile):
+            generation = await asyncio.to_thread(
+                self.localscript_service.generate,
+                task,
+                context_messages=self.memory_manager.get_context(),
+                allow_clarification=False,
+            )
+            logs = [ActionLogEntry(message="Выполнен автоматический LocalScript-пайплайн")]
+            logs.extend(generation.logs)
+            logs.extend(self._validation_logs(generation.validation.is_valid, generation.validation.issues))
+            return self._finalize_response(
+                generation.code,
+                logs,
+                extra_metrics={
+                    "validation_checks": len(generation.validation.checks),
+                    "validation_errors": len(generation.validation.issues),
+                    "candidate_count": generation.candidate_count,
+                    "selected_strategy": generation.selected_strategy,
+                },
+            )
+
         plan = await asyncio.to_thread(
             self.llm_client.chat,
             [{"role": "user", "content": build_auto_mode_prompt(task)}],
         )
-        logs = [ActionLogEntry(message="Created execution plan for auto mode")]
+        logs = [ActionLogEntry(message="Сформирован план для автоматического режима")]
         lower_task = task.lower()
 
         if "rest api" in lower_task or "api" in lower_task:
@@ -177,10 +270,10 @@ class Orchestrator:
             )
             logs.extend(mkdir_result.logs)
             logs.extend(main_result.logs)
-            answer = f"{plan}\n\nExecution finished.\nCreated {target_folder / 'main.py'}."
+            answer = f"{plan}\n\nВыполнение завершено.\nСоздан файл {target_folder / 'main.py'}."
             return self._finalize_response(answer, logs)
 
-        answer = f"{plan}\n\nAuto mode is ready, but no built-in executor matched this task."
+        answer = f"{plan}\n\nАвто-режим подготовлен, но для этой задачи пока нет встроенного исполнителя."
         return self._finalize_response(answer, logs)
 
     def warm_up_models(self) -> dict[str, float]:
@@ -190,12 +283,22 @@ class Orchestrator:
             timings[model_name] = self.llm_client.warm_up(model_name)
         return timings
 
-    def _finalize_response(self, text: str, logs: list[ActionLogEntry]) -> AssistantResponse:
-        self.memory_manager.add_message("assistant", text)
+    def _finalize_response(
+        self,
+        text: str,
+        logs: list[ActionLogEntry],
+        *,
+        persist_memory: bool = True,
+        extra_metrics: dict[str, int] | None = None,
+    ) -> AssistantResponse:
+        if persist_memory:
+            self.memory_manager.add_message("assistant", text)
         metrics = {
             "request_count": self.request_count,
             "estimated_tokens": max(1, len(text) // 4),
         }
+        if extra_metrics:
+            metrics.update(extra_metrics)
         return AssistantResponse(text=text, logs=logs, metrics=metrics)
 
     def _extract_inline_content(self, user_input: str) -> str | None:
@@ -235,3 +338,39 @@ class Orchestrator:
         if len(user_input) < 240:
             return min(settings.max_tokens, 384 if is_vision_model else 320)
         return min(settings.max_tokens, 640 if is_vision_model else 512)
+
+    def _should_use_localscript_pipeline(self, user_input: str, *, assistant_profile: str | None = None) -> bool:
+        settings = self.settings_manager.get_settings()
+        profile = (assistant_profile or settings.assistant_profile).strip().lower()
+        if profile != "localscript":
+            return False
+
+        lowered = user_input.lower()
+        generic_meta_markers = (
+            "openapi",
+            "docker",
+            "model",
+            "модель",
+            "настройк",
+            "лог",
+            "benchmark",
+            "self-check",
+            "self check",
+            "оценк",
+            "балл",
+            "что умеешь",
+            "как запустить",
+        )
+        if any(marker in lowered for marker in generic_meta_markers):
+            return False
+        return True
+
+    def _validation_logs(self, is_valid: bool, issues: list[object]) -> list[ActionLogEntry]:
+        if is_valid:
+            return [ActionLogEntry(message="Валидация LocalScript пройдена")]
+
+        logs = [ActionLogEntry(message="Валидация LocalScript не пройдена", success=False)]
+        for issue in issues:
+            message = getattr(issue, "message", str(issue))
+            logs.append(ActionLogEntry(message=message, success=False))
+        return logs

@@ -222,10 +222,11 @@ class AssistantWorker(QThread):
     failed = Signal(str)
     chunk = Signal(str)
 
-    def __init__(self, backend: AssistantBackend, prompt: str) -> None:
+    def __init__(self, backend: AssistantBackend, prompt: str, assistant_mode: str) -> None:
         super().__init__()
         self.backend = backend
         self.prompt = prompt
+        self.assistant_mode = assistant_mode
 
     def run(self) -> None:  # type: ignore[override]
         try:
@@ -233,6 +234,7 @@ class AssistantWorker(QThread):
                 self.backend.orchestrator.handle_with_callbacks(
                     self.prompt,
                     on_text_chunk=self.chunk.emit,
+                    assistant_profile=self.assistant_mode,
                 )
             )
             self.completed.emit(response)
@@ -501,6 +503,30 @@ class AssistantWindow(QMainWindow):
         top_bar.addStretch(1)
         top_bar.addWidget(self.response_time_label)
 
+        mode_bar = QFrame()
+        mode_bar.setObjectName("modeBar")
+        mode_layout = QHBoxLayout(mode_bar)
+        mode_layout.setContentsMargins(12, 10, 12, 10)
+        mode_layout.setSpacing(10)
+
+        mode_title = QLabel("Режим чата")
+        mode_title.setObjectName("sectionTitle")
+        self.mode_hint_label = QLabel("")
+        self.mode_hint_label.setObjectName("infoLabel")
+        self.lua_mode_button = QPushButton("Lua-код")
+        self.lua_mode_button.setObjectName("modeToggleButton")
+        self.lua_mode_button.setCheckable(True)
+        self.chat_mode_button = QPushButton("Чат-бот")
+        self.chat_mode_button.setObjectName("modeToggleButton")
+        self.chat_mode_button.setCheckable(True)
+
+        mode_layout.addWidget(mode_title)
+        mode_layout.addSpacing(8)
+        mode_layout.addWidget(self.lua_mode_button)
+        mode_layout.addWidget(self.chat_mode_button)
+        mode_layout.addStretch(1)
+        mode_layout.addWidget(self.mode_hint_label)
+
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
 
@@ -564,6 +590,7 @@ class AssistantWindow(QMainWindow):
         self.main_splitter.setSizes([900, 340])
 
         content_layout.addLayout(top_bar)
+        content_layout.addWidget(mode_bar)
         content_layout.addWidget(self.main_splitter, 1)
 
         main_layout.addWidget(self.sidebar)
@@ -575,6 +602,8 @@ class AssistantWindow(QMainWindow):
         self.warmup_button.clicked.connect(self._warm_up_models)
         self.send_button.clicked.connect(self._send_message)
         self.input_box.send_requested.connect(self._send_message)
+        self.lua_mode_button.clicked.connect(lambda: self._switch_session_mode("localscript"))
+        self.chat_mode_button.clicked.connect(lambda: self._switch_session_mode("chat"))
         self.like_button.clicked.connect(lambda: self._save_feedback(True))
         self.dislike_button.clicked.connect(lambda: self._save_feedback(False))
         self.sessions_list.itemClicked.connect(self._open_selected_session)
@@ -599,6 +628,11 @@ class AssistantWindow(QMainWindow):
                 border: none;
             }}
             QFrame#chatPanel, QFrame#sidePanel {{
+                background: {COLORS["bg_panel"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 14px;
+            }}
+            QFrame#modeBar {{
                 background: {COLORS["bg_panel"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 14px;
@@ -658,6 +692,15 @@ class AssistantWindow(QMainWindow):
             }}
             QPushButton:hover {{
                 background: {COLORS["bg_accent"]};
+            }}
+            QPushButton#modeToggleButton {{
+                min-width: 118px;
+                padding: 9px 14px;
+            }}
+            QPushButton#modeToggleButton:checked {{
+                background: {COLORS["bg_accent"]};
+                border: 1px solid {COLORS["text"]};
+                font-weight: 700;
             }}
             QPushButton:disabled {{
                 color: {COLORS["muted"]};
@@ -728,7 +771,7 @@ class AssistantWindow(QMainWindow):
         for session in self.backend.memory_manager.list_sessions():
             item = QListWidgetItem(session.title)
             item.setData(Qt.UserRole, session.id)
-            item.setToolTip(session.title)
+            item.setToolTip(f"{session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}")
             self.sessions_list.addItem(item)
             if session.id == active_id:
                 self.sessions_list.setCurrentItem(item)
@@ -739,6 +782,7 @@ class AssistantWindow(QMainWindow):
         for message in self.backend.memory_manager.get_all_messages():
             self.chat_view.add_message(message.role, message.content)
         self.chat_view.scroll_to_bottom()
+        self._update_mode_controls()
 
     def _refresh_runtime_labels(self) -> None:
         settings = self.backend.settings_manager.get_settings()
@@ -748,7 +792,59 @@ class AssistantWindow(QMainWindow):
             f"Контекст: {stats['context_messages']} сообщений / {settings.memory_max_tokens} токенов"
         )
         self.model_label.setText(f"Chat: {settings.model} | Vision: {settings.vision_model}")
-        self.status_label.setToolTip(f"Текущий чат: {session.title}")
+        self.status_label.setToolTip(
+            f"Текущий чат: {session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}"
+        )
+
+    def _assistant_mode_title(self, assistant_mode: str) -> str:
+        return "Чат-бот" if assistant_mode == "chat" else "Lua-код"
+
+    def _assistant_mode_hint(self, assistant_mode: str) -> str:
+        if assistant_mode == "chat":
+            return "Обычный AI-ассистент на русском языке"
+        return "Генерация и доработка LocalScript / Lua"
+
+    def _current_assistant_mode(self) -> str:
+        return self.backend.memory_manager.get_active_session_mode()
+
+    def _update_mode_controls(self) -> None:
+        mode = self._current_assistant_mode()
+        self.lua_mode_button.setChecked(mode == "localscript")
+        self.chat_mode_button.setChecked(mode == "chat")
+        self.mode_hint_label.setText(self._assistant_mode_hint(mode))
+        if mode == "chat":
+            self.input_box.setPlaceholderText(
+                "Напишите сообщение ассистенту. Enter отправит сообщение, Shift+Enter добавит новую строку."
+            )
+        else:
+            self.input_box.setPlaceholderText(
+                "Опишите задачу для генерации или доработки LocalScript/Lua. Enter отправит сообщение, Shift+Enter добавит новую строку."
+            )
+
+    def _switch_session_mode(self, assistant_mode: str) -> None:
+        if self._is_busy():
+            QMessageBox.information(self, "Подождите", "Сменить режим можно после завершения текущего запроса.")
+            self._update_mode_controls()
+            return
+
+        normalized = "chat" if assistant_mode == "chat" else "localscript"
+        session_id = self.backend.memory_manager.get_active_session_id()
+        current_mode = self._current_assistant_mode()
+        if current_mode == normalized:
+            self._update_mode_controls()
+            return
+
+        if not self.backend.memory_manager.set_session_mode(session_id, normalized):
+            self._update_mode_controls()
+            return
+
+        session = self.backend.memory_manager.get_current_session()
+        mode_title = self._assistant_mode_title(normalized)
+        self._update_mode_controls()
+        self._refresh_sessions()
+        self._refresh_runtime_labels()
+        self.status_label.setText(f"Режим чата: {mode_title}")
+        self._append_log("INFO", f"Режим чата переключен: {session.title} -> {mode_title}")
 
     def _apply_log_panel_visibility(self, visible: bool) -> None:
         self.side_panel.setVisible(visible)
@@ -812,15 +908,20 @@ class AssistantWindow(QMainWindow):
             QMessageBox.information(self, "Подождите", "Предыдущий запрос ещё выполняется.")
             return
 
+        assistant_mode = self._current_assistant_mode()
         self.chat_view.add_message("user", prompt)
         self.input_box.clear()
         self.status_label.setText("Ожидаю ответ модели...")
-        self._append_log("INFO", "Запрос отправлен модели", details=prompt)
+        self._append_log(
+            "INFO",
+            f"Запрос отправлен модели ({self._assistant_mode_title(assistant_mode)})",
+            details=prompt,
+        )
         self._set_controls_enabled(False)
         self._start_response_timer()
         self.stream_started = False
 
-        self.worker = AssistantWorker(self.backend, prompt)
+        self.worker = AssistantWorker(self.backend, prompt, assistant_mode)
         self.worker.chunk.connect(self._on_response_chunk)
         self.worker.completed.connect(self._on_response_ready)
         self.worker.failed.connect(self._on_response_failed)
@@ -830,7 +931,7 @@ class AssistantWindow(QMainWindow):
         self.worker = None
         if self.stream_started:
             streamed_text = self.chat_view.finish_streaming_message()
-            if streamed_text and streamed_text != response.text:
+            if streamed_text.strip() and streamed_text.strip() != response.text.strip():
                 self.chat_view.add_message("assistant", response.text)
         else:
             self.chat_view.add_message("assistant", response.text)
@@ -873,6 +974,8 @@ class AssistantWindow(QMainWindow):
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.send_button.setEnabled(enabled)
+        self.lua_mode_button.setEnabled(enabled)
+        self.chat_mode_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
         self.image_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)
@@ -896,7 +999,10 @@ class AssistantWindow(QMainWindow):
         self._refresh_sessions()
         self._load_current_session()
         self.status_label.setText(f"Создан {session.title}")
-        self._append_log("INFO", f"Создан новый чат: {session.title}")
+        self._append_log(
+            "INFO",
+            f"Создан новый чат: {session.title} ({self._assistant_mode_title(session.assistant_mode)})",
+        )
         self._refresh_runtime_labels()
 
     def _open_selected_session(self, item: QListWidgetItem) -> None:
@@ -910,7 +1016,10 @@ class AssistantWindow(QMainWindow):
             self._refresh_sessions()
             self._refresh_runtime_labels()
             self.status_label.setText("Чат загружен")
-            self._append_log("INFO", f"Открыт чат: {item.text()}")
+            self._append_log(
+                "INFO",
+                f"Открыт чат: {item.text()} ({self._assistant_mode_title(self._current_assistant_mode())})",
+            )
 
     def _open_sessions_context_menu(self, position) -> None:
         item = self.sessions_list.itemAt(position)

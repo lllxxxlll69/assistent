@@ -39,6 +39,7 @@ class Message:
 class ChatSession:
     id: str
     title: str
+    assistant_mode: str = "localscript"
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     messages: list[Message] = field(default_factory=list)
@@ -47,6 +48,7 @@ class ChatSession:
         return {
             "id": self.id,
             "title": self.title,
+            "assistant_mode": self.assistant_mode,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "messages": [message.to_dict() for message in self.messages],
@@ -116,3 +118,29 @@ class AssistantResponse:
     text: str
     logs: list[ActionLogEntry] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ValidationIssue:
+    rule: str
+    message: str
+    severity: str = "error"
+
+
+@dataclass(slots=True)
+class ValidationResult:
+    is_valid: bool
+    normalized_code: str
+    issues: list[ValidationIssue] = field(default_factory=list)
+    checks: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class LocalScriptGeneration:
+    code: str
+    validation: ValidationResult
+    logs: list[ActionLogEntry] = field(default_factory=list)
+    clarification_question: str | None = None
+    raw_response: str = ""
+    selected_strategy: str = "single"
+    candidate_count: int = 1

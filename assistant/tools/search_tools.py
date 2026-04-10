@@ -6,19 +6,28 @@ from dataclasses import asdict
 from pathlib import Path
 
 from assistant.config.settings import Settings
-from assistant.models import RetrievalChunk, ToolResult
+from assistant.models import ActionLogEntry, RetrievalChunk, ToolResult
 
 
 class SearchTools:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.workspace_root = Path(settings.workspace_root).resolve(strict=False)
 
     def search_local_files(self, query: str, root: str | None = None) -> ToolResult:
-        search_root = Path(root or self.settings.search_root)
+        search_root, error = self._resolve_search_root(root)
+        if error:
+            return ToolResult(
+                content=error,
+                logs=[ActionLogEntry(message=error, success=False)],
+                structured_data={"chunks": []},
+            )
+
         chunks = self.retrieve_chunks(query=query, root=search_root)
         rendered = "\n\n".join(chunk.to_prompt_block() for chunk in chunks) or "No relevant files found."
         return ToolResult(
             content=rendered,
+            logs=[ActionLogEntry(message=f"Local search completed in {search_root}")],
             structured_data={"chunks": [asdict(chunk) for chunk in chunks]},
         )
 
@@ -28,11 +37,14 @@ class SearchTools:
 
         query_terms = self._tokenize(query)
         scored_chunks: list[RetrievalChunk] = []
+        max_file_size = self.settings.max_search_file_size_kb * 1024
 
         for path in root.rglob("*"):
             if not path.is_file() or self._should_skip(path):
                 continue
             try:
+                if path.stat().st_size > max_file_size:
+                    continue
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
@@ -67,6 +79,15 @@ class SearchTools:
     def _tokenize(self, text: str) -> list[str]:
         return [token.lower() for token in text.replace("\n", " ").split() if token.strip()]
 
+    def _resolve_search_root(self, root: str | None) -> tuple[Path, str | None]:
+        candidate = Path(root or self.settings.search_root)
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (self.workspace_root / candidate).resolve(strict=False)
+        try:
+            resolved.relative_to(self.workspace_root)
+        except ValueError:
+            return self.workspace_root, f"Search root is outside workspace: {resolved}"
+        return resolved, None
+
     def _should_skip(self, path: Path) -> bool:
-        skipped_parts = {".git", ".venv", "__pycache__", "node_modules", ".idea"}
+        skipped_parts = {".git", ".venv", "__pycache__", "node_modules", ".idea", ".assistant_data"}
         return any(part in skipped_parts for part in path.parts)

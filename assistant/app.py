@@ -6,6 +6,7 @@ from assistant.config.settings import SettingsManager
 from assistant.core.agent import Agent
 from assistant.core.orchestrator import Orchestrator
 from assistant.llm.client import LLMClient
+from assistant.localscript.service import LocalScriptService
 from assistant.memory.memory_manager import MemoryManager
 from assistant.tools.file_tools import FileTools
 from assistant.tools.search_tools import SearchTools
@@ -25,14 +26,19 @@ def build_backend(settings_manager: SettingsManager | None = None) -> AssistantB
 
     llm_client = LLMClient(settings)
     memory_manager = MemoryManager(manager)
+    localscript_service = LocalScriptService(
+        settings_manager=manager,
+        llm_client=llm_client,
+    )
     orchestrator = Orchestrator(
         agent=Agent(),
         settings_manager=manager,
         memory_manager=memory_manager,
         llm_client=llm_client,
-        file_tools=FileTools(),
-        vision_tools=VisionTools(LLMClient(settings)),
+        file_tools=FileTools(settings),
+        vision_tools=VisionTools(LLMClient(settings), settings),
         search_tools=SearchTools(settings),
+        localscript_service=localscript_service,
     )
     return AssistantBackend(
         settings_manager=manager,
