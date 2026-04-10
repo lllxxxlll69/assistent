@@ -5,3 +5,4 @@ __pycache__
 *.pyc
 .assistant_data
 tests/__pycache__
+__MACOSX

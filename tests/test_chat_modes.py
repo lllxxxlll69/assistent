@@ -38,6 +38,25 @@ class ChatModeTests(unittest.TestCase):
             reloaded = MemoryManager(manager, history_path=history_path)
             self.assertEqual(reloaded.get_active_session_mode(), "chat")
 
+    def test_agent_mode_and_workspace_are_saved_and_restored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            settings_path = Path(tmp_dir) / "settings.json"
+            history_path = Path(tmp_dir) / "history.json"
+            workspace_path = str(Path(tmp_dir) / "workspace")
+
+            manager = SettingsManager(settings_path)
+            memory = MemoryManager(manager, history_path=history_path)
+            session = memory.get_current_session()
+
+            self.assertTrue(memory.set_session_workspace_root(session.id, workspace_path))
+            self.assertTrue(memory.set_session_mode(session.id, "agent"))
+            self.assertEqual(memory.get_active_session_mode(), "agent")
+            self.assertEqual(memory.get_active_workspace_root(), workspace_path)
+
+            reloaded = MemoryManager(manager, history_path=history_path)
+            self.assertEqual(reloaded.get_active_session_mode(), "agent")
+            self.assertEqual(reloaded.get_active_workspace_root(), workspace_path)
+
 
 if __name__ == "__main__":
     unittest.main()

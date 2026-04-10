@@ -153,6 +153,21 @@ class MemoryManager:
         self._save()
         return True
 
+    def get_active_workspace_root(self) -> str:
+        return self.get_current_session().workspace_root
+
+    def set_session_workspace_root(self, session_id: str, workspace_root: str) -> bool:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return False
+        normalized = workspace_root.strip()
+        if session.workspace_root == normalized:
+            return True
+        session.workspace_root = normalized
+        session.updated_at = utc_now_iso()
+        self._save()
+        return True
+
     def get_current_session(self) -> ChatSession:
         if not self._sessions:
             return self.create_session()
@@ -212,6 +227,7 @@ class MemoryManager:
                 id=item["id"],
                 title=item["title"],
                 assistant_mode=self._normalize_assistant_mode(item.get("assistant_mode")),
+                workspace_root=item.get("workspace_root", ""),
                 created_at=item.get("created_at", utc_now_iso()),
                 updated_at=item.get("updated_at", utc_now_iso()),
                 messages=messages,
@@ -262,4 +278,6 @@ class MemoryManager:
         normalized = (assistant_mode or "").strip().lower()
         if normalized in {"chat", "assistant", "general", "default"}:
             return "chat"
+        if normalized in {"agent", "project", "workspace"}:
+            return "agent"
         return "localscript"

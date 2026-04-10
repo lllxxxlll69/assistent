@@ -8,6 +8,7 @@ from assistant.core.orchestrator import Orchestrator
 from assistant.llm.client import LLMClient
 from assistant.localscript.service import LocalScriptService
 from assistant.memory.memory_manager import MemoryManager
+from assistant.project_agent.service import ProjectAgentService
 from assistant.tools.file_tools import FileTools
 from assistant.tools.search_tools import SearchTools
 from assistant.tools.vision_tools import VisionTools
@@ -23,6 +24,7 @@ class AssistantBackend:
 def build_backend(settings_manager: SettingsManager | None = None) -> AssistantBackend:
     manager = settings_manager or SettingsManager()
     settings = manager.get_settings()
+    agent = Agent()
 
     llm_client = LLMClient(settings)
     memory_manager = MemoryManager(manager)
@@ -30,8 +32,13 @@ def build_backend(settings_manager: SettingsManager | None = None) -> AssistantB
         settings_manager=manager,
         llm_client=llm_client,
     )
+    project_agent_service = ProjectAgentService(
+        settings_manager=manager,
+        llm_client=llm_client,
+        agent=agent,
+    )
     orchestrator = Orchestrator(
-        agent=Agent(),
+        agent=agent,
         settings_manager=manager,
         memory_manager=memory_manager,
         llm_client=llm_client,
@@ -39,6 +46,7 @@ def build_backend(settings_manager: SettingsManager | None = None) -> AssistantB
         vision_tools=VisionTools(LLMClient(settings), settings),
         search_tools=SearchTools(settings),
         localscript_service=localscript_service,
+        project_agent_service=project_agent_service,
     )
     return AssistantBackend(
         settings_manager=manager,

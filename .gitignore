@@ -1,7 +1,10 @@
 .assistant_data/
 .venv/
 __pycache__/
+*.pyc
 logs/
 model/
 assistant_history.db
 tmp_assistant_demo/
+__MACOSX/
+.idea/workspace.xml

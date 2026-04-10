@@ -4,7 +4,62 @@ import json
 from time import perf_counter
 from typing import Any, AsyncIterator, Iterable
 
-import requests
+try:
+    import requests
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal local envs
+    from urllib import error as urllib_error
+    from urllib import request as urllib_request
+
+    class _CompatRequestException(Exception):
+        pass
+
+    class _CompatResponse:
+        def __init__(self, body: bytes, status_code: int) -> None:
+            self._body = body
+            self.status_code = status_code
+            self.text = body.decode("utf-8", errors="replace")
+
+        def json(self) -> dict[str, Any]:
+            return json.loads(self.text)
+
+        def iter_lines(self, decode_unicode: bool = False):
+            for line in self.text.splitlines():
+                yield line if decode_unicode else line.encode("utf-8")
+
+        def close(self) -> None:
+            return None
+
+    class _CompatSession:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, Any] | None = None,
+            stream: bool = False,
+            timeout: int | float | None = None,
+        ) -> _CompatResponse:
+            del stream
+            payload = b""
+            headers = dict(self.headers)
+            if json is not None:
+                payload = __import__("json").dumps(json).encode("utf-8")
+                headers.setdefault("Content-Type", "application/json")
+            request = urllib_request.Request(url, data=payload, headers=headers, method="POST")
+            try:
+                with urllib_request.urlopen(request, timeout=timeout) as response:
+                    body = response.read()
+                    return _CompatResponse(body=body, status_code=response.status)
+            except urllib_error.URLError as exc:
+                raise _CompatRequestException(str(exc)) from exc
+
+    class _CompatRequestsModule:
+        RequestException = _CompatRequestException
+        Session = _CompatSession
+
+    requests = _CompatRequestsModule()
 
 from assistant.config.settings import Settings
 

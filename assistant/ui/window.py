@@ -94,20 +94,43 @@ class AutoResizeTextEdit(QTextEdit):
 class MessageBubble(QFrame):
     def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.role = role
         self._text = text
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(4)
 
-        role_label = QLabel("Вы" if role == "user" else "Ассистент")
-        role_label.setObjectName("messageRole")
+        role_titles = {
+            "user": "Вы",
+            "assistant": "Ассистент",
+            "thought": "Мысли агента",
+        }
+        self.role_label = QLabel(role_titles.get(role, "Ассистент"))
+        self.role_label.setObjectName("messageRole")
+        self.role_label.setProperty("messageType", role)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+        header_layout.addWidget(self.role_label)
+        header_layout.addStretch(1)
 
         self.text_label = QLabel(text)
         self.text_label.setWordWrap(True)
         self.text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.text_label.setObjectName("messageText")
+        self.text_label.setProperty("messageType", role)
 
-        outer.addWidget(role_label)
+        self.toggle_button: QPushButton | None = None
+        self._thought_expanded = True
+        if role == "thought":
+            self.toggle_button = QPushButton("Свернуть")
+            self.toggle_button.setObjectName("thoughtToggleButton")
+            self.toggle_button.setCursor(Qt.PointingHandCursor)
+            self.toggle_button.clicked.connect(self.toggle_thought_visibility)
+            header_layout.addWidget(self.toggle_button, 0, Qt.AlignRight)
+
+        outer.addLayout(header_layout)
         outer.addWidget(self.text_label)
         self.setObjectName("messageBubble")
         self.setProperty("messageType", role)
@@ -121,6 +144,14 @@ class MessageBubble(QFrame):
 
     def plain_text(self) -> str:
         return self._text
+
+    def toggle_thought_visibility(self) -> None:
+        if self.role != "thought":
+            return
+        self._thought_expanded = not self._thought_expanded
+        self.text_label.setVisible(self._thought_expanded)
+        if self.toggle_button is not None:
+            self.toggle_button.setText("Свернуть" if self._thought_expanded else "Развернуть")
 
 
 class ChatRow(QWidget):
@@ -168,6 +199,7 @@ class ChatView(QWidget):
         self.messages_layout.setSpacing(10)
         self.messages_layout.addStretch(1)
         self._streaming_row: ChatRow | None = None
+        self._thought_row: ChatRow | None = None
 
         self.scroll_area.setWidget(self.container)
         layout.addWidget(self.scroll_area)
@@ -179,6 +211,7 @@ class ChatView(QWidget):
             if widget is not None:
                 widget.deleteLater()
         self._streaming_row = None
+        self._thought_row = None
 
     def add_message(self, role: str, text: str) -> None:
         row = ChatRow(role=role, text=text)
@@ -212,6 +245,35 @@ class ChatView(QWidget):
             self._streaming_row.deleteLater()
         self._streaming_row = None
 
+    def start_thought_message(self, text: str = "") -> None:
+        if self._thought_row is not None:
+            if text:
+                self._thought_row.bubble.set_text(text)
+            return
+        self._thought_row = ChatRow(role="thought", text=text)
+        self.messages_layout.insertWidget(self.messages_layout.count() - 1, self._thought_row)
+        QTimer.singleShot(0, self.scroll_to_bottom)
+
+    def append_thought_line(self, line: str) -> None:
+        cleaned = line.strip()
+        if not cleaned:
+            return
+        if self._thought_row is None:
+            self.start_thought_message("")
+        if self._thought_row is None:
+            return
+        current = self._thought_row.plain_text().strip()
+        next_line = f"- {cleaned}"
+        existing_lines = current.splitlines() if current else []
+        if next_line in existing_lines:
+            return
+        updated = current + ("\n" if current else "") + next_line
+        self._thought_row.bubble.set_text(updated)
+        QTimer.singleShot(0, self.scroll_to_bottom)
+
+    def finish_thought_message(self) -> None:
+        self._thought_row = None
+
     def scroll_to_bottom(self) -> None:
         bar = self.scroll_area.verticalScrollBar()
         bar.setValue(bar.maximum())
@@ -221,6 +283,7 @@ class AssistantWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
     chunk = Signal(str)
+    status = Signal(str)
 
     def __init__(self, backend: AssistantBackend, prompt: str, assistant_mode: str) -> None:
         super().__init__()
@@ -234,6 +297,7 @@ class AssistantWorker(QThread):
                 self.backend.orchestrator.handle_with_callbacks(
                     self.prompt,
                     on_text_chunk=self.chunk.emit,
+                    on_status_update=self.status.emit,
                     assistant_profile=self.assistant_mode,
                 )
             )
@@ -519,12 +583,22 @@ class AssistantWindow(QMainWindow):
         self.chat_mode_button = QPushButton("Чат-бот")
         self.chat_mode_button.setObjectName("modeToggleButton")
         self.chat_mode_button.setCheckable(True)
+        self.agent_mode_button = QPushButton("Агент")
+        self.agent_mode_button.setObjectName("modeToggleButton")
+        self.agent_mode_button.setCheckable(True)
+        self.workspace_label = QLabel("")
+        self.workspace_label.setObjectName("infoLabel")
+        self.workspace_button = QPushButton("Папка проекта")
+        self.workspace_button.setObjectName("modeToggleButton")
 
         mode_layout.addWidget(mode_title)
         mode_layout.addSpacing(8)
         mode_layout.addWidget(self.lua_mode_button)
         mode_layout.addWidget(self.chat_mode_button)
+        mode_layout.addWidget(self.agent_mode_button)
         mode_layout.addStretch(1)
+        mode_layout.addWidget(self.workspace_label)
+        mode_layout.addWidget(self.workspace_button)
         mode_layout.addWidget(self.mode_hint_label)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
@@ -565,6 +639,16 @@ class AssistantWindow(QMainWindow):
 
         logs_title = QLabel("Журнал действий")
         logs_title.setObjectName("sectionTitle")
+        thoughts_title = QLabel("Мысли агента")
+        thoughts_title.setObjectName("sectionTitle")
+        self.agent_thoughts_box = QPlainTextEdit()
+        self.agent_thoughts_box.setObjectName("agentThoughtsBox")
+        self.agent_thoughts_box.setReadOnly(True)
+        self.agent_thoughts_box.setFrameShape(QFrame.NoFrame)
+        self.agent_thoughts_box.viewport().setObjectName("agentThoughtsViewport")
+        self.agent_thoughts_box.viewport().setAutoFillBackground(False)
+        self.agent_thoughts_box.setPlaceholderText("Здесь агент будет показывать, что именно он собирается сделать.")
+        self.agent_thoughts_box.setMinimumHeight(150)
         self.logs_list = QListWidget()
         self.logs_list.setObjectName("logsList")
 
@@ -578,6 +662,8 @@ class AssistantWindow(QMainWindow):
         self.details_box.setReadOnly(True)
         self.details_box.setPlaceholderText("Здесь видны метрики и служебная информация последнего ответа.")
 
+        side_layout.addWidget(thoughts_title)
+        side_layout.addWidget(self.agent_thoughts_box)
         side_layout.addWidget(logs_title)
         side_layout.addWidget(self.logs_list, 1)
         side_layout.addLayout(feedback_row)
@@ -604,6 +690,8 @@ class AssistantWindow(QMainWindow):
         self.input_box.send_requested.connect(self._send_message)
         self.lua_mode_button.clicked.connect(lambda: self._switch_session_mode("localscript"))
         self.chat_mode_button.clicked.connect(lambda: self._switch_session_mode("chat"))
+        self.agent_mode_button.clicked.connect(lambda: self._switch_session_mode("agent"))
+        self.workspace_button.clicked.connect(self._choose_agent_workspace)
         self.like_button.clicked.connect(lambda: self._save_feedback(True))
         self.dislike_button.clicked.connect(lambda: self._save_feedback(False))
         self.sessions_list.itemClicked.connect(self._open_selected_session)
@@ -652,6 +740,22 @@ class AssistantWindow(QMainWindow):
             QFrame#messageBubble[messageType="user"] {{
                 background: {COLORS["bg_accent"]};
             }}
+            QFrame#messageBubble[messageType="thought"] {{
+                background: transparent;
+                border: none;
+            }}
+            QPushButton#thoughtToggleButton {{
+                min-width: 92px;
+                padding: 4px 10px;
+                font-size: 12px;
+                background: transparent;
+                border: none;
+                color: {COLORS["muted"]};
+            }}
+            QPushButton#thoughtToggleButton:hover {{
+                background: transparent;
+                color: {COLORS["text"]};
+            }}
             QLabel#appTitle {{
                 font-size: 22px;
                 font-weight: 700;
@@ -670,6 +774,25 @@ class AssistantWindow(QMainWindow):
             }}
             QLabel#messageText {{
                 font-size: 15px;
+            }}
+            QLabel#messageRole[messageType="thought"] {{
+                color: {COLORS["muted"]};
+                font-size: 11px;
+            }}
+            QLabel#messageText[messageType="thought"] {{
+                color: {COLORS["muted"]};
+                font-size: 13px;
+            }}
+            QPlainTextEdit#agentThoughtsBox {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                color: {COLORS["muted"]};
+                selection-background-color: {COLORS["bg_accent"]};
+            }}
+            QWidget#agentThoughtsViewport {{
+                background: transparent;
+                border: none;
             }}
             QLabel#topStatus {{
                 font-size: 15px;
@@ -771,7 +894,10 @@ class AssistantWindow(QMainWindow):
         for session in self.backend.memory_manager.list_sessions():
             item = QListWidgetItem(session.title)
             item.setData(Qt.UserRole, session.id)
-            item.setToolTip(f"{session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}")
+            tooltip = f"{session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}"
+            if session.workspace_root:
+                tooltip += f"\nПапка: {session.workspace_root}"
+            item.setToolTip(tooltip)
             self.sessions_list.addItem(item)
             if session.id == active_id:
                 self.sessions_list.setCurrentItem(item)
@@ -783,6 +909,7 @@ class AssistantWindow(QMainWindow):
             self.chat_view.add_message(message.role, message.content)
         self.chat_view.scroll_to_bottom()
         self._update_mode_controls()
+        self._update_agent_thoughts()
 
     def _refresh_runtime_labels(self) -> None:
         settings = self.backend.settings_manager.get_settings()
@@ -795,13 +922,20 @@ class AssistantWindow(QMainWindow):
         self.status_label.setToolTip(
             f"Текущий чат: {session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}"
         )
+        self.workspace_label.setToolTip(session.workspace_root or "Для режима агента папка ещё не выбрана.")
 
     def _assistant_mode_title(self, assistant_mode: str) -> str:
-        return "Чат-бот" if assistant_mode == "chat" else "Lua-код"
+        if assistant_mode == "chat":
+            return "Чат-бот"
+        if assistant_mode == "agent":
+            return "Агент"
+        return "Lua-код"
 
     def _assistant_mode_hint(self, assistant_mode: str) -> str:
         if assistant_mode == "chat":
             return "Обычный AI-ассистент на русском языке"
+        if assistant_mode == "agent":
+            return "Работа с выбранной папкой проекта: анализ, создание и правка файлов"
         return "Генерация и доработка LocalScript / Lua"
 
     def _current_assistant_mode(self) -> str:
@@ -811,15 +945,21 @@ class AssistantWindow(QMainWindow):
         mode = self._current_assistant_mode()
         self.lua_mode_button.setChecked(mode == "localscript")
         self.chat_mode_button.setChecked(mode == "chat")
+        self.agent_mode_button.setChecked(mode == "agent")
         self.mode_hint_label.setText(self._assistant_mode_hint(mode))
         if mode == "chat":
             self.input_box.setPlaceholderText(
                 "Напишите сообщение ассистенту. Enter отправит сообщение, Shift+Enter добавит новую строку."
             )
+        elif mode == "agent":
+            self.input_box.setPlaceholderText(
+                "Опишите задачу по проекту. Агент посмотрит папку, найдёт нужные файлы и сам внесёт правки."
+            )
         else:
             self.input_box.setPlaceholderText(
                 "Опишите задачу для генерации или доработки LocalScript/Lua. Enter отправит сообщение, Shift+Enter добавит новую строку."
             )
+        self._update_workspace_controls()
 
     def _switch_session_mode(self, assistant_mode: str) -> None:
         if self._is_busy():
@@ -827,12 +967,22 @@ class AssistantWindow(QMainWindow):
             self._update_mode_controls()
             return
 
-        normalized = "chat" if assistant_mode == "chat" else "localscript"
+        if assistant_mode == "chat":
+            normalized = "chat"
+        elif assistant_mode == "agent":
+            normalized = "agent"
+        else:
+            normalized = "localscript"
         session_id = self.backend.memory_manager.get_active_session_id()
         current_mode = self._current_assistant_mode()
         if current_mode == normalized:
             self._update_mode_controls()
             return
+
+        if normalized == "agent" and not self.backend.memory_manager.get_active_workspace_root():
+            if not self._choose_agent_workspace():
+                self._update_mode_controls()
+                return
 
         if not self.backend.memory_manager.set_session_mode(session_id, normalized):
             self._update_mode_controls()
@@ -845,6 +995,93 @@ class AssistantWindow(QMainWindow):
         self._refresh_runtime_labels()
         self.status_label.setText(f"Режим чата: {mode_title}")
         self._append_log("INFO", f"Режим чата переключен: {session.title} -> {mode_title}")
+        self._update_agent_thoughts()
+
+    def _update_workspace_controls(self) -> None:
+        mode = self._current_assistant_mode()
+        workspace_root = self.backend.memory_manager.get_active_workspace_root()
+        is_agent = mode == "agent"
+        self.workspace_label.setVisible(is_agent)
+        self.workspace_button.setVisible(is_agent)
+        self.workspace_button.setEnabled(not self._is_busy() and is_agent)
+        if not is_agent:
+            self.workspace_label.setText("")
+            return
+        if workspace_root:
+            path = Path(workspace_root)
+            self.workspace_label.setText(f"Папка: {path.name}")
+        else:
+            self.workspace_label.setText("Папка: не выбрана")
+
+    def _choose_agent_workspace(self) -> bool:
+        if self._is_busy():
+            QMessageBox.information(self, "Подождите", "Сначала дождитесь завершения текущего запроса.")
+            return False
+
+        current_root = self.backend.memory_manager.get_active_workspace_root() or str(Path.cwd())
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите папку проекта для режима агента",
+            current_root,
+        )
+        if not selected:
+            return False
+        session_id = self.backend.memory_manager.get_active_session_id()
+        if not self.backend.memory_manager.set_session_workspace_root(session_id, selected):
+            return False
+        self._refresh_sessions()
+        self._refresh_runtime_labels()
+        self._update_mode_controls()
+        self.status_label.setText("Папка проекта выбрана")
+        self._append_log("INFO", f"Агент переключен на папку проекта: {selected}")
+        return True
+
+    def _ensure_agent_workspace(self) -> bool:
+        if self._current_assistant_mode() != "agent":
+            return True
+        workspace_root = self.backend.memory_manager.get_active_workspace_root()
+        if workspace_root and Path(workspace_root).exists():
+            return True
+        QMessageBox.information(
+            self,
+            "Папка проекта",
+            "Для режима агента нужно выбрать рабочую папку проекта.",
+        )
+        return self._choose_agent_workspace()
+
+    def _update_agent_thoughts(self, thoughts: list[str] | None = None) -> None:
+        if self._current_assistant_mode() != "agent":
+            self.agent_thoughts_box.setPlainText("Мысли агента отображаются только в режиме «Агент».")
+            return
+        if thoughts:
+            self.agent_thoughts_box.setPlainText("\n".join(f"- {item}" for item in thoughts))
+            return
+        workspace_root = self.backend.memory_manager.get_active_workspace_root()
+        if workspace_root:
+            self.agent_thoughts_box.setPlainText(
+                "Агент готов к работе.\n"
+                f"Текущая папка проекта: {workspace_root}\n"
+                "После запроса здесь появятся его шаги и мысли."
+            )
+        else:
+            self.agent_thoughts_box.setPlainText(
+                "Для режима «Агент» сначала выберите рабочую папку проекта."
+            )
+
+    def _append_agent_thought(self, thought: str) -> None:
+        cleaned = thought.strip()
+        if not cleaned:
+            return
+        current = self.agent_thoughts_box.toPlainText().strip()
+        line = f"- {cleaned}"
+        existing_lines = current.splitlines() if current else []
+        if line in existing_lines:
+            return
+        updated = current + ("\n" if current else "") + line
+        self.agent_thoughts_box.setPlainText(updated)
+        scrollbar = self.agent_thoughts_box.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        self.chat_view.append_thought_line(cleaned)
 
     def _apply_log_panel_visibility(self, visible: bool) -> None:
         self.side_panel.setVisible(visible)
@@ -909,9 +1146,14 @@ class AssistantWindow(QMainWindow):
             return
 
         assistant_mode = self._current_assistant_mode()
+        if assistant_mode == "agent" and not self._ensure_agent_workspace():
+            return
         self.chat_view.add_message("user", prompt)
         self.input_box.clear()
         self.status_label.setText("Ожидаю ответ модели...")
+        if assistant_mode == "agent":
+            self.agent_thoughts_box.setPlainText("Агент принял задачу и начинает разбор проекта...")
+            self.chat_view.start_thought_message("- Агент принял задачу и начинает разбор проекта...")
         self._append_log(
             "INFO",
             f"Запрос отправлен модели ({self._assistant_mode_title(assistant_mode)})",
@@ -923,12 +1165,14 @@ class AssistantWindow(QMainWindow):
 
         self.worker = AssistantWorker(self.backend, prompt, assistant_mode)
         self.worker.chunk.connect(self._on_response_chunk)
+        self.worker.status.connect(self._on_status_update)
         self.worker.completed.connect(self._on_response_ready)
         self.worker.failed.connect(self._on_response_failed)
         self.worker.start()
 
     def _on_response_ready(self, response: AssistantResponse) -> None:
         self.worker = None
+        assistant_mode = self._current_assistant_mode()
         if self.stream_started:
             streamed_text = self.chat_view.finish_streaming_message()
             if streamed_text.strip() and streamed_text.strip() != response.text.strip():
@@ -941,6 +1185,11 @@ class AssistantWindow(QMainWindow):
         for log in response.logs:
             prefix = "OK" if log.success else "ERR"
             self._append_log(prefix, log.message)
+
+        if assistant_mode == "agent":
+            for log in response.logs:
+                self._append_agent_thought(log.message)
+            self.chat_view.finish_thought_message()
 
         duration = self._stop_response_timer()
         response.metrics["response_seconds"] = round(duration, 2)
@@ -959,10 +1208,17 @@ class AssistantWindow(QMainWindow):
             self._append_log("INFO", "Начат потоковый вывод ответа")
         self.chat_view.append_streaming_chunk(chunk)
 
+    def _on_status_update(self, status_text: str) -> None:
+        if self._current_assistant_mode() != "agent":
+            return
+        self._append_agent_thought(status_text)
+
     def _on_response_failed(self, error_text: str) -> None:
         self.worker = None
         self.chat_view.abort_streaming_message()
         self.stream_started = False
+        self._append_agent_thought(f"Ошибка: {error_text}")
+        self.chat_view.finish_thought_message()
         duration = self._stop_response_timer()
         self.response_time_label.setText(f"Ответ: ошибка через {duration:.1f} s")
         self.status_label.setText("Ошибка")
@@ -976,11 +1232,13 @@ class AssistantWindow(QMainWindow):
         self.send_button.setEnabled(enabled)
         self.lua_mode_button.setEnabled(enabled)
         self.chat_mode_button.setEnabled(enabled)
+        self.agent_mode_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
         self.image_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)
         self.warmup_button.setEnabled(enabled)
         self.sessions_list.setEnabled(enabled)
+        self.workspace_button.setEnabled(enabled and self._current_assistant_mode() == "agent")
 
     def _is_busy(self) -> bool:
         return (
@@ -1004,6 +1262,7 @@ class AssistantWindow(QMainWindow):
             f"Создан новый чат: {session.title} ({self._assistant_mode_title(session.assistant_mode)})",
         )
         self._refresh_runtime_labels()
+        self._update_agent_thoughts()
 
     def _open_selected_session(self, item: QListWidgetItem) -> None:
         if self._is_busy():
@@ -1020,6 +1279,7 @@ class AssistantWindow(QMainWindow):
                 "INFO",
                 f"Открыт чат: {item.text()} ({self._assistant_mode_title(self._current_assistant_mode())})",
             )
+            self._update_agent_thoughts()
 
     def _open_sessions_context_menu(self, position) -> None:
         item = self.sessions_list.itemAt(position)
@@ -1134,6 +1394,7 @@ class AssistantWindow(QMainWindow):
         self._refresh_sessions()
         self._load_current_session()
         self._refresh_runtime_labels()
+        self._update_agent_thoughts()
 
     def _save_feedback(self, positive: bool) -> None:
         if not self.last_assistant_message:

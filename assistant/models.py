@@ -40,6 +40,7 @@ class ChatSession:
     id: str
     title: str
     assistant_mode: str = "localscript"
+    workspace_root: str = ""
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     messages: list[Message] = field(default_factory=list)
@@ -49,6 +50,7 @@ class ChatSession:
             "id": self.id,
             "title": self.title,
             "assistant_mode": self.assistant_mode,
+            "workspace_root": self.workspace_root,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "messages": [message.to_dict() for message in self.messages],
@@ -118,6 +120,14 @@ class AssistantResponse:
     text: str
     logs: list[ActionLogEntry] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ProjectAgentResult:
+    text: str
+    logs: list[ActionLogEntry] = field(default_factory=list)
+    changed_files: list[str] = field(default_factory=list)
+    workspace_root: str = ""
 
 
 @dataclass(slots=True)

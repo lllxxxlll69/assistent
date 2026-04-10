@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from assistant.config.settings import SettingsManager
 from assistant.core.agent import Agent
@@ -17,6 +18,7 @@ from assistant.models import (
     RetrievalChunk,
     VisionRequest,
 )
+from assistant.project_agent.service import ProjectAgentService
 from assistant.tools.file_tools import FileTools
 from assistant.tools.search_tools import SearchTools
 from assistant.tools.vision_tools import VisionTools
@@ -33,6 +35,7 @@ class Orchestrator:
         vision_tools: VisionTools,
         search_tools: SearchTools,
         localscript_service: LocalScriptService,
+        project_agent_service: ProjectAgentService,
     ) -> None:
         self.agent = agent
         self.settings_manager = settings_manager
@@ -42,6 +45,7 @@ class Orchestrator:
         self.vision_tools = vision_tools
         self.search_tools = search_tools
         self.localscript_service = localscript_service
+        self.project_agent_service = project_agent_service
         self.request_count = 0
 
     async def handle(self, user_input: str, *, assistant_profile: str | None = None) -> AssistantResponse:
@@ -51,10 +55,20 @@ class Orchestrator:
         self,
         user_input: str,
         on_text_chunk: Callable[[str], None] | None = None,
+        on_status_update: Callable[[str], None] | None = None,
         assistant_profile: str | None = None,
     ) -> AssistantResponse:
         self.request_count += 1
         self.memory_manager.add_message("user", user_input)
+        if self._is_agent_profile(assistant_profile):
+            return await self.generate_project_agent_response(
+                user_input,
+                persist_memory=True,
+                user_already_recorded=True,
+                use_memory_context=True,
+                count_request=False,
+                on_status_update=on_status_update,
+            )
         action = self.agent.decide(user_input)
         logs: list[ActionLogEntry] = []
 
@@ -174,6 +188,49 @@ class Orchestrator:
             },
         )
 
+    async def generate_project_agent_response(
+        self,
+        user_input: str,
+        *,
+        persist_memory: bool = False,
+        user_already_recorded: bool = False,
+        use_memory_context: bool = False,
+        count_request: bool = True,
+        on_status_update: Callable[[str], None] | None = None,
+    ) -> AssistantResponse:
+        if count_request:
+            self.request_count += 1
+
+        if persist_memory and not user_already_recorded:
+            self.memory_manager.add_message("user", user_input)
+
+        workspace_root = self.memory_manager.get_active_workspace_root()
+        if not workspace_root:
+            return self._finalize_response(
+                "Для режима агента сначала выберите рабочую папку проекта.",
+                [ActionLogEntry(message="Не выбрана рабочая папка агента.", success=False)],
+                persist_memory=persist_memory,
+                extra_metrics={"agent_changed_files": 0},
+            )
+
+        context_messages = self.memory_manager.get_context() if use_memory_context else []
+        result = await asyncio.to_thread(
+            self.project_agent_service.run,
+            user_input,
+            workspace_root=workspace_root,
+            context_messages=context_messages,
+            on_progress_update=on_status_update,
+        )
+        return self._finalize_response(
+            result.text,
+            result.logs,
+            persist_memory=persist_memory,
+            extra_metrics={
+                "agent_changed_files": len(result.changed_files),
+                "agent_workspace": result.workspace_root,
+            },
+        )
+
     def _generate_text_response(self, user_input: str, retrieval_chunks: list[RetrievalChunk]) -> str:
         settings = self.settings_manager.get_settings()
         messages = build_chat_messages(
@@ -289,7 +346,7 @@ class Orchestrator:
         logs: list[ActionLogEntry],
         *,
         persist_memory: bool = True,
-        extra_metrics: dict[str, int] | None = None,
+        extra_metrics: dict[str, Any] | None = None,
     ) -> AssistantResponse:
         if persist_memory:
             self.memory_manager.add_message("assistant", text)
@@ -364,6 +421,11 @@ class Orchestrator:
         if any(marker in lowered for marker in generic_meta_markers):
             return False
         return True
+
+    def _is_agent_profile(self, assistant_profile: str | None = None) -> bool:
+        settings = self.settings_manager.get_settings()
+        profile = (assistant_profile or settings.assistant_profile).strip().lower()
+        return profile == "agent"
 
     def _validation_logs(self, is_valid: bool, issues: list[object]) -> list[ActionLogEntry]:
         if is_valid:
