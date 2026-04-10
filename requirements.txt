@@ -1,6 +1,2 @@
 PySide6
 requests
-numpy
-sounddevice
-vosk
-pyttsx3
