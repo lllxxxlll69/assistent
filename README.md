@@ -1,4 +1,12 @@
-# Локальный AI-агент для LocalScript
+<p align="center">
+  <img src="assets/vomatix.png" width="140"/>
+</p>
+
+<h1>
+  Локальный AI-агент<br>
+  <span style="color:#4FC3F7;">VOMATIX CODE</span><br>
+  для LocalScript
+</h1>
 
 Локальный AI-агент для генерации Lua/LocalScript-кода в защищённом контуре.
 
@@ -60,6 +68,7 @@ docker-compose.yml
 Точная команда для демо-контура:
 
 ```bash
+
 ollama pull qwen2.5:3b
 ```
 
@@ -77,30 +86,35 @@ ollama pull qwen2.5:3b
 2. Скачайте модель:
 
 ```bash
+
 ollama pull qwen2.5:3b
 ```
 
 3. Запустите оконное приложение:
 
 ```bash
+
 python main.py
 ```
 
 4. Запустите HTTP API:
 
 ```bash
+
 python -m assistant.api
 ```
 
 Проверка здоровья API:
 
 ```bash
+
 curl http://127.0.0.1:8080/health
 ```
 
 Пример генерации кода:
 
 ```bash
+
 curl -X POST http://127.0.0.1:8080/generate ^
   -H "Content-Type: application/json" ^
   -d "{\"prompt\":\"Из полученного списка email получи последний. {\\\"wf\\\":{\\\"vars\\\":{\\\"emails\\\":[\\\"a\\\",\\\"b\\\"]}}}\"}"
@@ -109,6 +123,7 @@ curl -X POST http://127.0.0.1:8080/generate ^
 ## Однострочный запуск через Docker
 
 ```bash
+
 docker compose up --build
 ```
 
@@ -122,6 +137,7 @@ docker compose up --build
 Локальная smoke-проверка на публичных задачах:
 
 ```bash
+
 python -m assistant.localscript.benchmark
 ```
 
@@ -130,6 +146,7 @@ python -m assistant.localscript.benchmark
 Проверка judging-контура, фиксированных параметров и публичного benchmark:
 
 ```bash
+
 python -m assistant.localscript.self_check
 ```
 
@@ -138,6 +155,7 @@ python -m assistant.localscript.self_check
 Запуск автоматических проверок:
 
 ```bash
+
 python -m unittest discover -s tests -v
 ```
 

@@ -2,18 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from pathlib import Path
 from time import perf_counter
+from typing import Callable
 
-from PySide6.QtCore import QDateTime, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QDateTime,
+    QPoint,
+    QPropertyAnimation,
+    QParallelAnimationGroup,
+    QSize,
+    QThread,
+    QTimer,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QAction, QActionGroup, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -43,15 +60,31 @@ from assistant.models import AssistantResponse, utc_now_iso
 
 
 COLORS = {
-    "bg_main": "#16181d",
-    "bg_panel": "#20242b",
-    "bg_block": "#2b313b",
-    "bg_accent": "#334155",
-    "bg_accent_soft": "#293343",
-    "border": "#475569",
+    "bg_main": "#222222",
+    "bg_panel": "#1b1b1b",
+    "bg_block": "#1b1b1b",
+    "bg_accent": "#222222",
+    "bg_accent_soft": "#1b1b1b",
+    "border": "#2a2a2a",
     "text": "#e2e8f0",
     "muted": "#94a3b8",
 }
+
+
+def _load_icon(path: Path, size: QSize) -> QIcon:
+    if not path.exists():
+        return QIcon()
+
+    renderer = QSvgRenderer(str(path))
+    if renderer.isValid():
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        renderer.render(painter)
+        painter.end()
+        return QIcon(pixmap)
+
+    return QIcon(str(path))
 
 
 class AutoResizeTextEdit(QTextEdit):
@@ -62,10 +95,12 @@ class AutoResizeTextEdit(QTextEdit):
         self.setAcceptRichText(False)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QTextEdit.WidgetWidth)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.document().setDocumentMargin(0)
         self.document().contentsChanged.connect(self.update_height)
-        self._min_height = 56
-        self._max_height = 180
+        self._min_height = 32
+        self._max_height = 220
         self.update_height()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
@@ -79,12 +114,26 @@ class AutoResizeTextEdit(QTextEdit):
         super().keyPressEvent(event)
 
     def update_height(self) -> None:
-        doc_height = self.document().size().height()
+        text = self.toPlainText()
+        line_count = max(1, text.count("\n") + 1)
+        if line_count <= 1:
+            self.setViewportMargins(0, 6, 0, 6)
+            self.setFixedHeight(self._min_height)
+            return
+        top_inset = 6
+        bottom_inset = 6
+        self.setViewportMargins(0, top_inset, 0, bottom_inset)
+        visible_lines = min(max(1, line_count), 8)
+        line_height = QFontMetrics(self.font()).lineSpacing()
         margins = self.contentsMargins().top() + self.contentsMargins().bottom()
         frame = self.frameWidth() * 2
-        new_height = int(doc_height + margins + frame + 14)
+        new_height = int((visible_lines * line_height) + margins + frame + top_inset + bottom_inset + 8)
         new_height = max(self._min_height, min(self._max_height, new_height))
         self.setFixedHeight(new_height)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.update_height()
 
     def clear(self) -> None:  # type: ignore[override]
         super().clear()
@@ -165,19 +214,107 @@ class ChatRow(QWidget):
         self.bubble = MessageBubble(role=role, text=text)
         self.bubble.setMinimumWidth(240)
         self.bubble.setMaximumWidth(720)
+        self._feedback_state: bool | None = None
+        self._feedback_callback: Callable[[bool], None] | None = None
+        self.footer_widget: QWidget | None = None
+        self.time_label: QLabel | None = None
+        self.like_button: QPushButton | None = None
+        self.dislike_button: QPushButton | None = None
+        self._like_icon_off: QIcon | None = None
+        self._like_icon_on: QIcon | None = None
+        self._dislike_icon_off: QIcon | None = None
+        self._dislike_icon_on: QIcon | None = None
 
         if role == "user":
             layout.addStretch(1)
             layout.addWidget(self.bubble, 0, Qt.AlignRight | Qt.AlignTop)
-        else:
-            layout.addWidget(self.bubble, 0, Qt.AlignLeft | Qt.AlignTop)
+            return
+
+        if role == "assistant":
+            content = QWidget()
+            content.setObjectName("assistantMessageContainer")
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(6)
+            content_layout.addWidget(self.bubble, 0, Qt.AlignLeft | Qt.AlignTop)
+
+            self.footer_widget = QWidget()
+            self.footer_widget.setObjectName("assistantMessageFooter")
+            footer_layout = QHBoxLayout(self.footer_widget)
+            footer_layout.setContentsMargins(6, 0, 6, 0)
+            footer_layout.setSpacing(8)
+
+            self.time_label = QLabel("")
+            self.time_label.setObjectName("assistantMetaLabel")
+            self.time_label.setVisible(False)
+            footer_layout.addWidget(self.time_label)
+            footer_layout.addStretch(1)
+
+            self.like_button = QPushButton("")
+            self.like_button.setObjectName("assistantVoteButton")
+            self.like_button.setFixedSize(24, 24)
+            self.like_button.setCursor(Qt.PointingHandCursor)
+            self.like_button.clicked.connect(lambda: self._on_feedback_clicked(True))
+
+            self.dislike_button = QPushButton("")
+            self.dislike_button.setObjectName("assistantVoteButton")
+            self.dislike_button.setFixedSize(24, 24)
+            self.dislike_button.setCursor(Qt.PointingHandCursor)
+            self.dislike_button.clicked.connect(lambda: self._on_feedback_clicked(False))
+
+            footer_layout.addWidget(self.like_button, 0, Qt.AlignVCenter)
+            footer_layout.addWidget(self.dislike_button, 0, Qt.AlignVCenter)
+            content_layout.addWidget(self.footer_widget, 0, Qt.AlignLeft)
+
+            layout.addWidget(content, 0, Qt.AlignLeft | Qt.AlignTop)
             layout.addStretch(1)
+            return
+
+        layout.addWidget(self.bubble, 0, Qt.AlignLeft | Qt.AlignTop)
+        layout.addStretch(1)
 
     def append_text(self, chunk: str) -> None:
         self.bubble.append_text(chunk)
 
     def plain_text(self) -> str:
         return self.bubble.plain_text()
+
+    def configure_assistant_meta(
+        self,
+        elapsed_seconds: float,
+        on_feedback: Callable[[bool], None],
+        like_icon_off: QIcon,
+        like_icon_on: QIcon,
+        dislike_icon_off: QIcon,
+        dislike_icon_on: QIcon,
+    ) -> None:
+        if self.bubble.role != "assistant" or self.time_label is None or self.like_button is None or self.dislike_button is None:
+            return
+        self._feedback_callback = on_feedback
+        self._like_icon_off = like_icon_off
+        self._like_icon_on = like_icon_on
+        self._dislike_icon_off = dislike_icon_off
+        self._dislike_icon_on = dislike_icon_on
+        self.time_label.setText(f"{elapsed_seconds:.1f} s")
+        self.time_label.setVisible(True)
+        self._apply_feedback_icons()
+
+    def _on_feedback_clicked(self, positive: bool) -> None:
+        if self._feedback_callback is None:
+            return
+        self._feedback_state = positive
+        self._apply_feedback_icons()
+        self._feedback_callback(positive)
+
+    def _apply_feedback_icons(self) -> None:
+        if self.like_button is None or self.dislike_button is None:
+            return
+        if self._like_icon_off is not None and self._like_icon_on is not None:
+            self.like_button.setIcon(self._like_icon_on if self._feedback_state is True else self._like_icon_off)
+            self.like_button.setIconSize(QSize(16, 16))
+        if self._dislike_icon_off is not None and self._dislike_icon_on is not None:
+            self.dislike_button.setIcon(self._dislike_icon_on if self._feedback_state is False else self._dislike_icon_off)
+            self.dislike_button.setIconSize(QSize(16, 16))
 
 
 class ChatView(QWidget):
@@ -213,10 +350,11 @@ class ChatView(QWidget):
         self._streaming_row = None
         self._thought_row = None
 
-    def add_message(self, role: str, text: str) -> None:
+    def add_message(self, role: str, text: str) -> ChatRow:
         row = ChatRow(role=role, text=text)
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, row)
         QTimer.singleShot(0, self.scroll_to_bottom)
+        return row
 
     def start_streaming_assistant_message(self) -> None:
         if self._streaming_row is not None:
@@ -232,12 +370,12 @@ class ChatView(QWidget):
             self._streaming_row.append_text(chunk)
         QTimer.singleShot(0, self.scroll_to_bottom)
 
-    def finish_streaming_message(self) -> str:
+    def finish_streaming_message(self) -> ChatRow | None:
         if self._streaming_row is None:
-            return ""
-        text = self._streaming_row.plain_text()
+            return None
+        row = self._streaming_row
         self._streaming_row = None
-        return text
+        return row
 
     def abort_streaming_message(self) -> None:
         if self._streaming_row is not None:
@@ -483,6 +621,33 @@ class AssistantWindow(QMainWindow):
         self.last_assistant_message = ""
         self.feedback_path = self.backend.settings_manager.settings_path.parent / "feedback.log"
         self.runtime_log_path = self.backend.settings_manager.settings_path.parent / "app.log"
+        self.input_placeholders = [
+            "Как прошел ваш день?",
+            "Я здесь, чтобы помочь вам.",
+            "Что хотите сделать прямо сейчас?",
+            "Опишите задачу в двух словах.",
+            "С чего начнем?",
+            "Расскажите, что нужно улучшить.",
+            "Какая цель у этой задачи?",
+            "Давайте разберем это вместе.",
+            "Чем могу быть полезен?",
+            "Нужен код, идея или объяснение?",
+            "Опишите контекст, и я предложу решение.",
+            "Что важно сделать в первую очередь?",
+            "Покажите пример, и я продолжу.",
+            "Готов помочь с любым шагом.",
+            "Сформулируйте запрос, и начнем.",
+            "Что хотите автоматизировать?",
+            "Нужно быстрое решение или подробное?",
+            "Какой результат хотите получить?",
+            "Могу помочь с кодом, текстом и анализом.",
+            "Напишите задачу, и поехали.",
+        ]
+        icon_root = Path(__file__).resolve().parents[2] / "assets" / "icons"
+        self.like_icon_off = _load_icon(icon_root / "like_0.svg", QSize(16, 16))
+        self.like_icon_on = _load_icon(icon_root / "like_1.svg", QSize(16, 16))
+        self.dislike_icon_off = _load_icon(icon_root / "dis_0.svg", QSize(16, 16))
+        self.dislike_icon_on = _load_icon(icon_root / "dis_1.svg", QSize(16, 16))
         self.request_started_at: float | None = None
         self.stream_started = False
         self.response_update_timer = QTimer(self)
@@ -493,6 +658,7 @@ class AssistantWindow(QMainWindow):
         self.setMinimumSize(1120, 720)
 
         self._build_ui()
+        self._apply_chats_sidebar_state()
         self._apply_styles()
         self._start_clock()
         self._refresh_sessions()
@@ -508,12 +674,18 @@ class AssistantWindow(QMainWindow):
         self.setCentralWidget(root)
 
         main_layout = QHBoxLayout(root)
-        main_layout.setContentsMargins(18, 18, 18, 18)
-        main_layout.setSpacing(16)
+        self.main_layout = main_layout
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(260)
+        self.sidebar_expanded_width = 260
+        self.sidebar_collapsed_width = 0
+        self.sidebar_collapsed = False
+        self.sidebar.setMinimumWidth(self.sidebar_expanded_width)
+        self.sidebar.setMaximumWidth(self.sidebar_expanded_width)
+        self.sidebar_animation: QParallelAnimationGroup | None = None
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(10)
@@ -526,50 +698,83 @@ class AssistantWindow(QMainWindow):
         self.model_label.setObjectName("infoLabel")
         self.clock_label = QLabel("")
         self.clock_label.setObjectName("infoLabel")
+        app_title.setVisible(False)
+        self.context_label.setVisible(False)
+        self.model_label.setVisible(False)
+        self.clock_label.setVisible(False)
 
         chats_title = QLabel("Чаты")
-        chats_title.setObjectName("sectionTitle")
+        chats_title.setObjectName("topStatus")
+        chats_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        chats_title.setFixedHeight(28)
+        self.chats_title = chats_title
+        self.chats_collapse_button = QPushButton("◀")
+        self.chats_collapse_button.setObjectName("chatsCollapseButton")
+        self.chats_collapse_button.setFixedSize(22, 22)
+        self.chats_collapse_button.setToolTip("Свернуть список чатов")
+        self.chats_header_widget = QWidget()
+        self.chats_header_widget.setObjectName("chatsHeaderWidget")
+        self.chats_header_widget.setFixedHeight(28)
+        chats_header = QHBoxLayout(self.chats_header_widget)
+        chats_header.setContentsMargins(0, 0, 0, 0)
+        chats_header.setSpacing(4)
+        chats_header.addWidget(self.chats_title, 0, Qt.AlignVCenter)
+        chats_header.addStretch(1)
+        chats_header.addWidget(self.chats_collapse_button, 0, Qt.AlignRight | Qt.AlignVCenter)
         self.sessions_list = QListWidget()
         self.sessions_list.setObjectName("sessionsList")
         self.sessions_list.setMouseTracking(True)
         self.sessions_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sessions_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.sessions_list.setFocusPolicy(Qt.NoFocus)
 
         self.new_chat_button = QPushButton("Новый чат")
         self.image_button = QPushButton("Анализ изображения")
         self.settings_button = QPushButton("Настройки")
         self.warmup_button = QPushButton("Прогреть модели")
 
-        sidebar_layout.addWidget(app_title)
-        sidebar_layout.addWidget(self.context_label)
-        sidebar_layout.addWidget(self.model_label)
-        sidebar_layout.addWidget(self.clock_label)
-        sidebar_layout.addSpacing(8)
-        sidebar_layout.addWidget(chats_title)
-        sidebar_layout.addWidget(self.sessions_list, 1)
-        sidebar_layout.addWidget(self.new_chat_button)
-        sidebar_layout.addWidget(self.image_button)
-        sidebar_layout.addWidget(self.settings_button)
-        sidebar_layout.addWidget(self.warmup_button)
+        self.chats_card = QFrame()
+        self.chats_card.setObjectName("chatsCard")
+        chats_card_layout = QVBoxLayout(self.chats_card)
+        chats_card_layout.setContentsMargins(10, 10, 10, 10)
+        chats_card_layout.setSpacing(10)
+        chats_card_layout.addWidget(self.sessions_list, 1)
+        chats_card_layout.addWidget(self.new_chat_button)
+        chats_card_layout.addWidget(self.image_button)
+        chats_card_layout.addWidget(self.settings_button)
+        chats_card_layout.addWidget(self.warmup_button)
+
+        sidebar_layout.addWidget(self.chats_header_widget, 0, Qt.AlignTop)
+        sidebar_layout.addWidget(self.chats_card, 1)
 
         self.content = QFrame()
         self.content.setObjectName("contentPanel")
         content_layout = QVBoxLayout(self.content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(10)
 
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
-        self.status_label = QLabel("Готово")
+        top_bar.setSpacing(4)
+        self.expand_sidebar_button = QPushButton("▶")
+        self.expand_sidebar_button.setObjectName("expandSidebarButton")
+        self.expand_sidebar_button.setFixedSize(22, 22)
+        self.expand_sidebar_button.setVisible(False)
+        self.status_label = QLabel("ИИ готов к работе")
         self.status_label.setObjectName("topStatus")
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.status_label.setFixedHeight(28)
         self.response_time_label = QLabel("Ответ: --")
         self.response_time_label.setObjectName("infoLabel")
-        top_bar.addWidget(self.status_label)
+        self.response_time_label.setVisible(False)
+        top_bar.addWidget(self.expand_sidebar_button, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        top_bar.addWidget(self.status_label, 0, Qt.AlignLeft | Qt.AlignVCenter)
         top_bar.addStretch(1)
-        top_bar.addWidget(self.response_time_label)
+        top_bar.addWidget(self.response_time_label, 0, Qt.AlignVCenter)
 
-        mode_bar = QFrame()
-        mode_bar.setObjectName("modeBar")
-        mode_layout = QHBoxLayout(mode_bar)
+        self.mode_bar = QFrame()
+        self.mode_bar.setObjectName("modeBar")
+        mode_layout = QHBoxLayout(self.mode_bar)
         mode_layout.setContentsMargins(12, 10, 12, 10)
         mode_layout.setSpacing(10)
 
@@ -600,6 +805,7 @@ class AssistantWindow(QMainWindow):
         mode_layout.addWidget(self.workspace_label)
         mode_layout.addWidget(self.workspace_button)
         mode_layout.addWidget(self.mode_hint_label)
+        self.mode_bar.setVisible(False)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
@@ -607,34 +813,76 @@ class AssistantWindow(QMainWindow):
         chat_panel = QFrame()
         chat_panel.setObjectName("chatPanel")
         chat_layout = QVBoxLayout(chat_panel)
-        chat_layout.setContentsMargins(0, 0, 0, 0)
-        chat_layout.setSpacing(12)
+        chat_layout.setContentsMargins(10, 10, 10, 10)
+        chat_layout.setSpacing(10)
 
         self.chat_view = ChatView()
         chat_layout.addWidget(self.chat_view, 1)
 
         composer = QFrame()
         composer.setObjectName("composerPanel")
-        composer_layout = QHBoxLayout(composer)
-        composer_layout.setContentsMargins(0, 0, 0, 0)
-        composer_layout.setSpacing(12)
+        composer_layout = QGridLayout(composer)
+        self.composer_layout = composer_layout
+        composer_layout.setContentsMargins(10, 10, 10, 10)
+        composer_layout.setHorizontalSpacing(10)
+        composer_layout.setVerticalSpacing(10)
+        composer_layout.setColumnStretch(0, 0)
+        composer_layout.setColumnStretch(1, 1)
+        composer_layout.setColumnStretch(2, 0)
+
+        icon_root = Path(__file__).resolve().parents[2] / "assets" / "icons"
+        self.mode_menu_button = QPushButton("")
+        self.mode_menu_button.setObjectName("modeMenuButton")
+        self.mode_menu_button.setFixedSize(32, 32)
+        self.mode_menu_button.setIcon(_load_icon(icon_root / "more_icon.svg", QSize(14, 14)))
+        self.mode_menu_button.setIconSize(QSize(14, 14))
+        self.mode_menu_button.setToolTip("Выбор режима")
+
+        self.mode_menu = QMenu(self)
+        self.mode_menu.setObjectName("modePopupMenu")
+        self.mode_action_group = QActionGroup(self)
+        self.mode_action_group.setExclusive(True)
+        self.chat_mode_action = QAction(_load_icon(icon_root / "chatbot_icon.svg", QSize(16, 16)), "Чат-бот", self)
+        self.chat_mode_action.setCheckable(True)
+        self.agent_mode_action = QAction(_load_icon(icon_root / "agent_icon.svg", QSize(16, 16)), "Агент", self)
+        self.agent_mode_action.setCheckable(True)
+        self.lua_mode_action = QAction(_load_icon(icon_root / "lua_icon.svg", QSize(16, 16)), "Lua-код", self)
+        self.lua_mode_action.setCheckable(True)
+        self.chat_mode_button.setIcon(_load_icon(icon_root / "chatbot_icon.svg", QSize(16, 16)))
+        self.chat_mode_button.setIconSize(QSize(16, 16))
+        self.agent_mode_button.setIcon(_load_icon(icon_root / "agent_icon.svg", QSize(16, 16)))
+        self.agent_mode_button.setIconSize(QSize(16, 16))
+        self.lua_mode_button.setIcon(_load_icon(icon_root / "lua_icon.svg", QSize(16, 16)))
+        self.lua_mode_button.setIconSize(QSize(16, 16))
+        self.mode_action_group.addAction(self.chat_mode_action)
+        self.mode_action_group.addAction(self.agent_mode_action)
+        self.mode_action_group.addAction(self.lua_mode_action)
+        self.mode_menu.addAction(self.chat_mode_action)
+        self.mode_menu.addAction(self.agent_mode_action)
+        self.mode_menu.addAction(self.lua_mode_action)
+        self.mode_menu.addSeparator()
+        self.workspace_mode_action = QAction("Папка проекта", self)
+        self.mode_menu.addAction(self.workspace_mode_action)
 
         self.input_box = AutoResizeTextEdit()
-        self.input_box.setPlaceholderText(
-            "Напишите задачу. Enter отправит сообщение, Shift+Enter добавит новую строку."
-        )
+        self.input_box.setObjectName("chatInputBox")
+        self._set_random_input_placeholder()
         self.send_button = QPushButton("Отправить")
-        self.send_button.setFixedWidth(170)
-        self.send_button.setFixedHeight(44)
+        self.send_button.setObjectName("chatSendButton")
+        self.send_button.setToolTip("Отправить")
+        self.send_button.setText("")
+        self.send_button.setIcon(_load_icon(icon_root / "send_icon.svg", QSize(14, 14)))
+        self.send_button.setIconSize(QSize(14, 14))
+        self.send_button.setFixedSize(32, 32)
 
-        composer_layout.addWidget(self.input_box, 1, Qt.AlignBottom)
-        composer_layout.addWidget(self.send_button, 0, Qt.AlignBottom)
+        self._composer_multiline: bool | None = None
+        self._update_composer_layout()
         chat_layout.addWidget(composer)
 
         self.side_panel = QFrame()
         self.side_panel.setObjectName("sidePanel")
         side_layout = QVBoxLayout(self.side_panel)
-        side_layout.setContentsMargins(12, 12, 12, 12)
+        side_layout.setContentsMargins(10, 10, 10, 10)
         side_layout.setSpacing(10)
 
         logs_title = QLabel("Журнал действий")
@@ -652,12 +900,6 @@ class AssistantWindow(QMainWindow):
         self.logs_list = QListWidget()
         self.logs_list.setObjectName("logsList")
 
-        feedback_row = QHBoxLayout()
-        self.like_button = QPushButton("Полезно")
-        self.dislike_button = QPushButton("Не полезно")
-        feedback_row.addWidget(self.like_button)
-        feedback_row.addWidget(self.dislike_button)
-
         self.details_box = QPlainTextEdit()
         self.details_box.setReadOnly(True)
         self.details_box.setPlaceholderText("Здесь видны метрики и служебная информация последнего ответа.")
@@ -666,7 +908,6 @@ class AssistantWindow(QMainWindow):
         side_layout.addWidget(self.agent_thoughts_box)
         side_layout.addWidget(logs_title)
         side_layout.addWidget(self.logs_list, 1)
-        side_layout.addLayout(feedback_row)
         side_layout.addWidget(self.details_box)
 
         self.main_splitter.addWidget(chat_panel)
@@ -676,7 +917,6 @@ class AssistantWindow(QMainWindow):
         self.main_splitter.setSizes([900, 340])
 
         content_layout.addLayout(top_bar)
-        content_layout.addWidget(mode_bar)
         content_layout.addWidget(self.main_splitter, 1)
 
         main_layout.addWidget(self.sidebar)
@@ -686,17 +926,85 @@ class AssistantWindow(QMainWindow):
         self.image_button.clicked.connect(self._analyze_image)
         self.settings_button.clicked.connect(self._open_settings)
         self.warmup_button.clicked.connect(self._warm_up_models)
+        self.chats_collapse_button.clicked.connect(self._toggle_chats_sidebar)
+        self.expand_sidebar_button.clicked.connect(self._toggle_chats_sidebar)
+        self.mode_menu_button.clicked.connect(self._show_mode_menu)
+        self.chat_mode_action.triggered.connect(lambda: self._switch_session_mode("chat"))
+        self.agent_mode_action.triggered.connect(lambda: self._switch_session_mode("agent"))
+        self.lua_mode_action.triggered.connect(lambda: self._switch_session_mode("localscript"))
+        self.workspace_mode_action.triggered.connect(self._choose_agent_workspace)
         self.send_button.clicked.connect(self._send_message)
         self.input_box.send_requested.connect(self._send_message)
-        self.lua_mode_button.clicked.connect(lambda: self._switch_session_mode("localscript"))
-        self.chat_mode_button.clicked.connect(lambda: self._switch_session_mode("chat"))
-        self.agent_mode_button.clicked.connect(lambda: self._switch_session_mode("agent"))
-        self.workspace_button.clicked.connect(self._choose_agent_workspace)
-        self.like_button.clicked.connect(lambda: self._save_feedback(True))
-        self.dislike_button.clicked.connect(lambda: self._save_feedback(False))
+        self.input_box.textChanged.connect(self._update_composer_layout)
         self.sessions_list.itemClicked.connect(self._open_selected_session)
         self.sessions_list.customContextMenuRequested.connect(self._open_sessions_context_menu)
         self.logs_list.currentItemChanged.connect(self._show_log_details)
+
+    def _update_composer_layout(self) -> None:
+        multiline = "\n" in self.input_box.toPlainText()
+        if self._composer_multiline is multiline:
+            return
+        self._composer_multiline = multiline
+        layout = self.composer_layout
+        layout.removeWidget(self.mode_menu_button)
+        layout.removeWidget(self.input_box)
+        layout.removeWidget(self.send_button)
+        if multiline:
+            layout.setVerticalSpacing(6)
+            layout.addWidget(self.input_box, 0, 0, 1, 3)
+            layout.addWidget(self.mode_menu_button, 1, 0, 1, 1, Qt.AlignLeft | Qt.AlignBottom)
+            layout.addWidget(self.send_button, 1, 2, 1, 1, Qt.AlignRight | Qt.AlignBottom)
+        else:
+            layout.setVerticalSpacing(0)
+            layout.addWidget(self.mode_menu_button, 0, 0, 1, 1, Qt.AlignVCenter)
+            layout.addWidget(self.input_box, 0, 1, 1, 1, Qt.AlignVCenter)
+            layout.addWidget(self.send_button, 0, 2, 1, 1, Qt.AlignVCenter)
+
+    def _apply_chats_sidebar_state(self) -> None:
+        collapsed = self.sidebar_collapsed
+        self.chats_header_widget.setVisible(not collapsed)
+        self.chats_title.setVisible(not collapsed)
+        self.chats_card.setVisible(not collapsed)
+        self.chats_collapse_button.setVisible(not collapsed)
+        self.expand_sidebar_button.setVisible(collapsed)
+        self.chats_collapse_button.setText("▶" if collapsed else "◀")
+        self.chats_collapse_button.setToolTip("Развернуть список чатов" if collapsed else "Свернуть список чатов")
+        self.main_layout.setSpacing(0 if collapsed else 10)
+
+    def _toggle_chats_sidebar(self) -> None:
+        if self.sidebar_animation is not None and self.sidebar_animation.state() == QAbstractAnimation.Running:
+            return
+
+        current_width = self.sidebar.width()
+        target_width = self.sidebar_collapsed_width if not self.sidebar_collapsed else self.sidebar_expanded_width
+
+        if not self.sidebar_collapsed:
+            self.chats_header_widget.setVisible(False)
+            self.chats_title.setVisible(False)
+            self.chats_card.setVisible(False)
+
+        self.sidebar_animation = QParallelAnimationGroup(self)
+        min_anim = QPropertyAnimation(self.sidebar, b"minimumWidth")
+        min_anim.setDuration(230)
+        min_anim.setStartValue(current_width)
+        min_anim.setEndValue(target_width)
+        min_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        max_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
+        max_anim.setDuration(230)
+        max_anim.setStartValue(current_width)
+        max_anim.setEndValue(target_width)
+        max_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        self.sidebar_animation.addAnimation(min_anim)
+        self.sidebar_animation.addAnimation(max_anim)
+
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        if not self.sidebar_collapsed:
+            self.chats_header_widget.setVisible(True)
+            self.chats_title.setVisible(True)
+            self.chats_card.setVisible(True)
+
+        self._apply_chats_sidebar_state()
+        self.sidebar_animation.start()
 
     def _apply_styles(self) -> None:
         self.setFont(QFont("Segoe UI", 10))
@@ -715,19 +1023,66 @@ class AssistantWindow(QMainWindow):
                 background: transparent;
                 border: none;
             }}
+            QFrame#chatsCard {{
+                background: {COLORS["bg_panel"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 16px;
+            }}
             QFrame#chatPanel, QFrame#sidePanel {{
                 background: {COLORS["bg_panel"]};
                 border: 1px solid {COLORS["border"]};
-                border-radius: 14px;
+                border-radius: 16px;
             }}
             QFrame#modeBar {{
                 background: {COLORS["bg_panel"]};
                 border: 1px solid {COLORS["border"]};
-                border-radius: 14px;
+                border-radius: 16px;
             }}
             QFrame#composerPanel {{
+                background: {COLORS["bg_block"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 12px;
+            }}
+            QPushButton#modeMenuButton {{
                 background: transparent;
                 border: none;
+                border-radius: 16px;
+                padding: 0;
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                max-height: 32px;
+            }}
+            QPushButton#modeMenuButton:hover {{
+                background: #252525;
+            }}
+            QPushButton#chatsCollapseButton {{
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                padding: 0;
+                font-size: 14px;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
+            }}
+            QPushButton#chatsCollapseButton:hover {{
+                background: {COLORS["bg_accent_soft"]};
+            }}
+            QPushButton#expandSidebarButton {{
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                padding: 0;
+                font-size: 14px;
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
+            }}
+            QPushButton#expandSidebarButton:hover {{
+                background: {COLORS["bg_accent_soft"]};
             }}
             QWidget#chatRow, QWidget#chatContainer, QWidget#chatViewport {{
                 background: transparent;
@@ -775,6 +1130,20 @@ class AssistantWindow(QMainWindow):
             QLabel#messageText {{
                 font-size: 15px;
             }}
+            QLabel#assistantMetaLabel {{
+                color: {COLORS["muted"]};
+                font-size: 12px;
+                padding-left: 2px;
+            }}
+            QPushButton#assistantVoteButton {{
+                background: transparent;
+                border: none;
+                border-radius: 16px;
+                padding: 0;
+            }}
+            QPushButton#assistantVoteButton:hover {{
+                background: {COLORS["bg_accent_soft"]};
+            }}
             QLabel#messageRole[messageType="thought"] {{
                 color: {COLORS["muted"]};
                 font-size: 11px;
@@ -797,6 +1166,7 @@ class AssistantWindow(QMainWindow):
             QLabel#topStatus {{
                 font-size: 15px;
                 font-weight: 600;
+                padding: 0;
             }}
             QLabel#infoLabel {{
                 color: {COLORS["muted"]};
@@ -809,7 +1179,7 @@ class AssistantWindow(QMainWindow):
             QPushButton {{
                 background: {COLORS["bg_block"]};
                 border: 1px solid {COLORS["border"]};
-                border-radius: 10px;
+                border-radius: 12px;
                 padding: 11px 14px;
                 font-size: 14px;
             }}
@@ -831,21 +1201,70 @@ class AssistantWindow(QMainWindow):
             QTextEdit, QLineEdit, QPlainTextEdit, QListWidget, QSpinBox, QDoubleSpinBox {{
                 background: {COLORS["bg_block"]};
                 border: 1px solid {COLORS["border"]};
-                border-radius: 10px;
+                border-radius: 12px;
                 padding: 8px;
                 font-size: 14px;
             }}
+            QTextEdit#chatInputBox {{
+                background: transparent;
+                border: none;
+                border-radius: 12px;
+                padding: 0 8px;
+                font-size: 15px;
+            }}
+            QTextEdit#chatInputBox:focus {{
+                border: none;
+            }}
+            QPushButton#chatSendButton {{
+                background: #5978BF;
+                border: none;
+                border-radius: 16px;
+                padding: 0;
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                max-height: 32px;
+            }}
+            QPushButton#chatSendButton:hover {{
+                background: #6A86C7;
+            }}
+            QPushButton#chatSendButton:disabled {{
+                background: #42588E;
+                color: {COLORS["muted"]};
+            }}
             QListWidget#sessionsList::item {{
                 padding: 10px 12px;
-                border-radius: 8px;
-                margin: 2px 0;
+                border-radius: 12px;
+                margin: 0;
                 background: transparent;
+                border: 1px solid transparent;
+                outline: none;
+            }}
+            QListWidget#sessionsList {{
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+                outline: none;
+            }}
+            QListWidget#sessionsList::item:focus {{
+                outline: none;
             }}
             QListWidget#sessionsList::item:hover {{
                 background: {COLORS["bg_accent_soft"]};
             }}
             QListWidget#sessionsList::item:selected {{
                 background: {COLORS["bg_accent"]};
+                border: 1px solid {COLORS["text"]};
+            }}
+            QListWidget#sessionsList::item:selected:!active {{
+                background: {COLORS["bg_accent"]};
+                border: 1px solid {COLORS["text"]};
+            }}
+            QListWidget#sessionsList QLineEdit {{
+                background: transparent;
+                border: none;
+                padding: 0;
             }}
             QGroupBox {{
                 border: 1px solid {COLORS["border"]};
@@ -866,12 +1285,22 @@ class AssistantWindow(QMainWindow):
             QMenu {{
                 background: {COLORS["bg_panel"]};
                 border: 1px solid {COLORS["border"]};
-                border-radius: 10px;
+                border-radius: 12px;
                 padding: 6px;
+            }}
+            QMenu#modePopupMenu {{
+                background: #30343b;
+                border: 1px solid #464c55;
+                border-radius: 12px;
+                padding: 10px;
             }}
             QMenu::item {{
                 padding: 8px 16px;
-                border-radius: 8px;
+                border-radius: 12px;
+            }}
+            QMenu#modePopupMenu::item {{
+                padding: 10px 14px;
+                border-radius: 12px;
             }}
             QMenu::item:selected {{
                 background: {COLORS["bg_accent"]};
@@ -941,24 +1370,32 @@ class AssistantWindow(QMainWindow):
     def _current_assistant_mode(self) -> str:
         return self.backend.memory_manager.get_active_session_mode()
 
+    def _set_random_input_placeholder(self) -> None:
+        if self.input_box.toPlainText().strip():
+            return
+        self.input_box.setPlaceholderText(random.choice(self.input_placeholders))
+
+    def _show_mode_menu(self) -> None:
+        top_left = self.mode_menu_button.mapToGlobal(self.mode_menu_button.rect().topLeft())
+        bottom_left = self.mode_menu_button.mapToGlobal(self.mode_menu_button.rect().bottomLeft())
+        menu_size = self.mode_menu.sizeHint()
+        x = top_left.x()
+        y = top_left.y() - menu_size.height() - 8
+        if y < 0:
+            y = bottom_left.y() + 8
+        self.mode_menu.popup(QPoint(x, y))
+
     def _update_mode_controls(self) -> None:
         mode = self._current_assistant_mode()
         self.lua_mode_button.setChecked(mode == "localscript")
         self.chat_mode_button.setChecked(mode == "chat")
         self.agent_mode_button.setChecked(mode == "agent")
+        self.lua_mode_action.setChecked(mode == "localscript")
+        self.chat_mode_action.setChecked(mode == "chat")
+        self.agent_mode_action.setChecked(mode == "agent")
+        self.mode_menu_button.setToolTip(f"Режим: {self._assistant_mode_title(mode)}")
         self.mode_hint_label.setText(self._assistant_mode_hint(mode))
-        if mode == "chat":
-            self.input_box.setPlaceholderText(
-                "Напишите сообщение ассистенту. Enter отправит сообщение, Shift+Enter добавит новую строку."
-            )
-        elif mode == "agent":
-            self.input_box.setPlaceholderText(
-                "Опишите задачу по проекту. Агент посмотрит папку, найдёт нужные файлы и сам внесёт правки."
-            )
-        else:
-            self.input_box.setPlaceholderText(
-                "Опишите задачу для генерации или доработки LocalScript/Lua. Enter отправит сообщение, Shift+Enter добавит новую строку."
-            )
+        self._set_random_input_placeholder()
         self._update_workspace_controls()
 
     def _switch_session_mode(self, assistant_mode: str) -> None:
@@ -1001,6 +1438,7 @@ class AssistantWindow(QMainWindow):
         mode = self._current_assistant_mode()
         workspace_root = self.backend.memory_manager.get_active_workspace_root()
         is_agent = mode == "agent"
+        self.workspace_mode_action.setEnabled(not self._is_busy() and is_agent)
         self.workspace_label.setVisible(is_agent)
         self.workspace_button.setVisible(is_agent)
         self.workspace_button.setEnabled(not self._is_busy() and is_agent)
@@ -1150,6 +1588,7 @@ class AssistantWindow(QMainWindow):
             return
         self.chat_view.add_message("user", prompt)
         self.input_box.clear()
+        self._set_random_input_placeholder()
         self.status_label.setText("Ожидаю ответ модели...")
         if assistant_mode == "agent":
             self.agent_thoughts_box.setPlainText("Агент принял задачу и начинает разбор проекта...")
@@ -1173,12 +1612,16 @@ class AssistantWindow(QMainWindow):
     def _on_response_ready(self, response: AssistantResponse) -> None:
         self.worker = None
         assistant_mode = self._current_assistant_mode()
+        assistant_row: ChatRow | None = None
         if self.stream_started:
-            streamed_text = self.chat_view.finish_streaming_message()
+            streamed_row = self.chat_view.finish_streaming_message()
+            streamed_text = streamed_row.plain_text() if streamed_row is not None else ""
             if streamed_text.strip() and streamed_text.strip() != response.text.strip():
-                self.chat_view.add_message("assistant", response.text)
+                assistant_row = self.chat_view.add_message("assistant", response.text)
+            else:
+                assistant_row = streamed_row
         else:
-            self.chat_view.add_message("assistant", response.text)
+            assistant_row = self.chat_view.add_message("assistant", response.text)
         self.stream_started = False
         self.last_assistant_message = response.text
 
@@ -1192,11 +1635,13 @@ class AssistantWindow(QMainWindow):
             self.chat_view.finish_thought_message()
 
         duration = self._stop_response_timer()
+        if assistant_row is not None:
+            self._attach_assistant_row_meta(assistant_row, response.text, duration)
         response.metrics["response_seconds"] = round(duration, 2)
         details = json.dumps(response.metrics, ensure_ascii=False, indent=2) + f"\n\nПоследний ответ:\n{response.text}"
         self.details_box.setPlainText(details)
         self._append_log("OK", f"Ответ получен за {duration:.2f} s", details=details)
-        self.status_label.setText("Готово")
+        self.status_label.setText("ИИ готов к работе")
         self._set_controls_enabled(True)
         self._refresh_sessions()
         self._refresh_runtime_labels()
@@ -1229,6 +1674,9 @@ class AssistantWindow(QMainWindow):
         QMessageBox.critical(self, "Ошибка ассистента", error_text)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
+        self.chats_collapse_button.setEnabled(enabled)
+        self.expand_sidebar_button.setEnabled(enabled)
+        self.mode_menu_button.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.lua_mode_button.setEnabled(enabled)
         self.chat_mode_button.setEnabled(enabled)
@@ -1239,6 +1687,7 @@ class AssistantWindow(QMainWindow):
         self.warmup_button.setEnabled(enabled)
         self.sessions_list.setEnabled(enabled)
         self.workspace_button.setEnabled(enabled and self._current_assistant_mode() == "agent")
+        self.workspace_mode_action.setEnabled(enabled and self._current_assistant_mode() == "agent")
 
     def _is_busy(self) -> bool:
         return (
@@ -1396,8 +1845,19 @@ class AssistantWindow(QMainWindow):
         self._refresh_runtime_labels()
         self._update_agent_thoughts()
 
-    def _save_feedback(self, positive: bool) -> None:
-        if not self.last_assistant_message:
+    def _attach_assistant_row_meta(self, row: ChatRow, message_text: str, duration: float) -> None:
+        row.configure_assistant_meta(
+            elapsed_seconds=duration,
+            on_feedback=lambda positive, text=message_text: self._save_feedback(positive, text),
+            like_icon_off=self.like_icon_off,
+            like_icon_on=self.like_icon_on,
+            dislike_icon_off=self.dislike_icon_off,
+            dislike_icon_on=self.dislike_icon_on,
+        )
+
+    def _save_feedback(self, positive: bool, message_text: str | None = None) -> None:
+        target_message = message_text or self.last_assistant_message
+        if not target_message:
             QMessageBox.information(self, "Фидбек", "Сначала получите ответ ассистента.")
             return
 
@@ -1406,7 +1866,7 @@ class AssistantWindow(QMainWindow):
             "created_at": utc_now_iso(),
             "session_id": self.backend.memory_manager.get_active_session_id(),
             "positive": positive,
-            "message": self.last_assistant_message,
+            "message": target_message,
         }
         with self.feedback_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -1479,3 +1939,4 @@ def main() -> None:
     window = AssistantWindow()
     window.show()
     app.exec()
+
