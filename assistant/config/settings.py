@@ -35,6 +35,7 @@ class Settings:
     show_logs: bool = True
     batch_size: int = 1
     assistant_profile: str = "localscript"
+    agent_self_check_attempts: int = 3
     localscript_context_size: int = 4096
     localscript_num_predict: int = 256
     localscript_auto_validate: bool = True
@@ -126,6 +127,7 @@ class SettingsManager:
             "ASSISTANT_MAX_IMAGE_SIZE_MB": ("max_image_size_mb", int),
             "ASSISTANT_BATCH_SIZE": ("batch_size", int),
             "ASSISTANT_PROFILE": ("assistant_profile", str),
+            "ASSISTANT_AGENT_SELF_CHECK_ATTEMPTS": ("agent_self_check_attempts", int),
             "ASSISTANT_LOCALSCRIPT_CONTEXT_SIZE": ("localscript_context_size", int),
             "ASSISTANT_LOCALSCRIPT_NUM_PREDICT": ("localscript_num_predict", int),
             "ASSISTANT_LOCALSCRIPT_REPAIR_ATTEMPTS": ("localscript_repair_attempts", int),

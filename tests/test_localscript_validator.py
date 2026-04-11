@@ -72,6 +72,18 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertTrue(any(item.name == "luac_parse" for item in result.check_results))
         self.assertIn(result.luac_status, {"passed", "skipped_with_reason"})
 
+    def test_rejects_template_markers(self) -> None:
+        task = 'Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}'
+        code = "-- insert code here\nreturn wf.vars.orderId"
+        result = self.validator.validate(task, code)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule in {"no_placeholders", "no_templates"} for issue in result.issues))
+
+    def test_rejects_randomness_when_not_requested(self) -> None:
+        result = self.validator.validate("Верни число.", "return math.random()")
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule == "deterministic_output" for issue in result.issues))
+
 
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
@@ -79,6 +91,13 @@ class LocalScriptKnowledgeTests(unittest.TestCase):
         selected = knowledge.select_examples("Из полученного списка email получи последний.", limit=2)
         self.assertGreaterEqual(len(selected), 1)
         self.assertIn("email", selected[0].prompt.lower())
+
+    def test_generation_guidance_avoids_ready_made_code_templates(self) -> None:
+        knowledge = LocalScriptKnowledgeBase()
+        guidance = knowledge.render_generation_guidance("Из полученного списка email получи последний.", limit=1)
+        self.assertIn("Reference 1:", guidance)
+        self.assertNotIn("Expected output:", guidance)
+        self.assertNotIn("return wf.vars.emails[#wf.vars.emails]", guidance)
 
 
 class LocalScriptServiceTests(unittest.TestCase):
@@ -158,6 +177,23 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertEqual(generation.code, "return wf.vars.emails[#wf.vars.emails]")
         self.assertEqual(generation.selected_strategy, "baseline")
         self.assertTrue(any(item.stage == "llm_cycle_started" for item in generation.trace))
+
+    def test_generation_prompt_includes_self_check_without_expected_output_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient([]))
+            messages = service._build_generation_messages(
+                LAST_EMAIL_TASK,
+                context_messages=[],
+                strategy="baseline",
+                assumptions=[],
+                feedback_hints=[],
+            )
+        system_prompt = messages[0]["content"]
+        self.assertIn("Внутренний self-check", system_prompt)
+        self.assertIn("Релевантные сигналы по похожим задачам", system_prompt)
+        self.assertNotIn("Expected output:", system_prompt)
+        self.assertNotIn("return wf.vars.emails[#wf.vars.emails]", system_prompt)
 
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):

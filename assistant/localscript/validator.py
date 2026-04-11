@@ -33,7 +33,20 @@ JSON_RESULT_PHRASES = (
     "json-объект",
 )
 MARK_AS_ARRAY_MARKERS = ("markasarray", "помет")
-PLACEHOLDER_MARKERS = ("todo", "placeholder", "your_code", "epoch_seconds")
+PLACEHOLDER_MARKERS = (
+    "todo",
+    "placeholder",
+    "your_code",
+    "epoch_seconds",
+    "insert code here",
+    "write code here",
+    "boilerplate",
+    "your logic",
+)
+TEMPLATE_MARKER_RE = re.compile(
+    r"(?i)(insert(?: your)? code here|write(?: the)? code here|example code|sample code|boilerplate)"
+)
+NON_DETERMINISTIC_RE = re.compile(r"\bmath\.random(?:seed)?\b|\bRandom\.new\b")
 
 
 @dataclass(slots=True)
@@ -45,6 +58,7 @@ class LuacCheckOutcome:
 
 class LocalScriptValidator:
     def validate(self, task: str, candidate: str) -> ValidationResult:
+        raw_candidate = candidate or ""
         normalized_code = self.normalize(candidate)
         issues: list[ValidationIssue] = []
         checks: list[str] = []
@@ -185,7 +199,7 @@ class LocalScriptValidator:
         else:
             pass_check("non_trivial_code")
 
-        placeholder_hits = [marker for marker in PLACEHOLDER_MARKERS if marker in normalized_code.lower()]
+        placeholder_hits = [marker for marker in PLACEHOLDER_MARKERS if marker in raw_candidate.lower()]
         if placeholder_hits:
             fail_check(
                 "no_placeholders",
@@ -193,6 +207,24 @@ class LocalScriptValidator:
             )
         else:
             pass_check("no_placeholders")
+
+        template_match = TEMPLATE_MARKER_RE.search(raw_candidate)
+        if template_match:
+            fail_check(
+                "no_templates",
+                f"Result still contains template or boilerplate marker: {template_match.group(0)!r}.",
+            )
+        else:
+            pass_check("no_templates")
+
+        explicit_randomness = any(marker in lower_task for marker in ("random", "случайн"))
+        if NON_DETERMINISTIC_RE.search(normalized_code) and not explicit_randomness:
+            fail_check(
+                "deterministic_output",
+                "Avoid randomness in generated LocalScript unless the task explicitly requests it.",
+            )
+        else:
+            pass_check("deterministic_output")
 
         lua_blocks = self._extract_lua_blocks(normalized_code)
         if not lua_blocks:

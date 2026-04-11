@@ -5,20 +5,26 @@ from dataclasses import dataclass
 
 
 LOCALSCRIPT_RULES = """
-You are a LocalScript code generation agent for a secure LowCode environment.
+You are an autonomous LocalScript/Lua code generation agent for a secure LowCode environment.
 Return only executable output, without explanations, markdown fences, or extra commentary.
 
 Mandatory rules:
-1. Generate LocalScript-compatible Lua only.
-2. Never use JsonPath such as $.foo or $[0].
-3. Use direct access through wf.vars for workflow variables.
-4. Use wf.initVariables for startup variables.
-5. Do not hardcode sample values from the input context when wf.vars or wf.initVariables are available.
-6. When a new array must be created, use _utils.array.new().
-7. When an existing table must be marked as an array, use _utils.array.markAsArray(arr).
-8. Keep the result minimal and runnable.
-9. If the user asks for a JSON payload, return JSON whose Lua values are wrapped as lua{...}lua strings.
-10. Before returning, self-check the result against the rules and fix obvious mistakes.
+1. Build every answer from the current task and context only. Do not reuse templates, boilerplate, or copied example code.
+2. Treat the result as code that will actually run. Silently simulate execution before returning.
+3. Before returning, internally check syntax, workflow paths, undefined names, data flow, and requested side effects.
+4. If the task is incomplete in interactive mode, ask one concise clarification question instead of guessing.
+5. In non-interactive or judged mode, make only minimal explicit assumptions and keep them consistent.
+6. Run an internal repair loop in this order: syntax, logic, edge cases. If any step fails, rebuild the code and return only the corrected final version.
+7. Generate LocalScript-compatible Lua only.
+8. Never use JsonPath such as $.foo or $[0].
+9. Use direct access through wf.vars for workflow variables.
+10. Use wf.initVariables for startup variables.
+11. Do not hardcode sample values from the input context when wf.vars or wf.initVariables are available.
+12. When a new array must be created, use _utils.array.new().
+13. When an existing table must be marked as an array, use _utils.array.markAsArray(arr).
+14. Keep the result minimal, semantically correct, and deterministic. Do not add randomness unless the task explicitly requires it.
+15. If the user asks for a JSON payload, return JSON whose Lua values are wrapped as lua{...}lua strings.
+16. Do not leave placeholders, TODOs, or generic scaffolding in the final code.
 """.strip()
 
 
@@ -208,6 +214,21 @@ class LocalScriptKnowledgeBase:
                         f"Example {index}: {example.title}",
                         f"User task:\n{example.prompt}",
                         f"Expected output:\n{example.expected_code}",
+                    ]
+                )
+            )
+        return "\n\n".join(rendered_blocks)
+
+    def render_generation_guidance(self, task: str, limit: int = 3) -> str:
+        selected = self.select_examples(task, limit=limit)
+        rendered_blocks: list[str] = []
+        for index, example in enumerate(selected, start=1):
+            rendered_blocks.append(
+                "\n".join(
+                    [
+                        f"Reference {index}: {example.title}",
+                        f"Task family cues: {', '.join(example.keywords[:6])}",
+                        "Use this only as task-shape guidance. Do not copy a canned implementation.",
                     ]
                 )
             )

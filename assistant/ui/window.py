@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from assistant.app import AssistantBackend, build_backend
 from assistant.config.settings import Settings
+from assistant.local_chat.window import LocalChatWindow
 from assistant.llm.client import LLMClientError
 from assistant.models import AssistantResponse, utc_now_iso
 
@@ -618,6 +619,7 @@ class AssistantWindow(QMainWindow):
         self.backend = build_backend()
         self.worker: AssistantWorker | None = None
         self.warmup_worker: WarmupWorker | None = None
+        self.local_chat_window: LocalChatWindow | None = None
         self.last_assistant_message = ""
         self.feedback_path = self.backend.settings_manager.settings_path.parent / "feedback.log"
         self.runtime_log_path = self.backend.settings_manager.settings_path.parent / "app.log"
@@ -730,6 +732,7 @@ class AssistantWindow(QMainWindow):
 
         self.new_chat_button = QPushButton("Новый чат")
         self.image_button = QPushButton("Анализ изображения")
+        self.local_chat_button = QPushButton("Локальный чат")
         self.settings_button = QPushButton("Настройки")
         self.warmup_button = QPushButton("Прогреть модели")
 
@@ -741,6 +744,7 @@ class AssistantWindow(QMainWindow):
         chats_card_layout.addWidget(self.sessions_list, 1)
         chats_card_layout.addWidget(self.new_chat_button)
         chats_card_layout.addWidget(self.image_button)
+        chats_card_layout.addWidget(self.local_chat_button)
         chats_card_layout.addWidget(self.settings_button)
         chats_card_layout.addWidget(self.warmup_button)
 
@@ -924,6 +928,7 @@ class AssistantWindow(QMainWindow):
 
         self.new_chat_button.clicked.connect(self._start_new_chat)
         self.image_button.clicked.connect(self._analyze_image)
+        self.local_chat_button.clicked.connect(self._open_local_chat_window)
         self.settings_button.clicked.connect(self._open_settings)
         self.warmup_button.clicked.connect(self._warm_up_models)
         self.chats_collapse_button.clicked.connect(self._toggle_chats_sidebar)
@@ -1810,6 +1815,18 @@ class AssistantWindow(QMainWindow):
         self._append_log("INFO", f"Выбрано изображение для анализа: {file_path}", details=prompt.strip())
         self._send_prompt(f"{prompt.strip()} {file_path}")
 
+    def _open_local_chat_window(self) -> None:
+        if self.local_chat_window is None:
+            self.local_chat_window = LocalChatWindow(self)
+            self.local_chat_window.destroyed.connect(self._on_local_chat_window_closed)
+        self.local_chat_window.show()
+        self.local_chat_window.raise_()
+        self.local_chat_window.activateWindow()
+        self._append_log("INFO", "Открыто отдельное окно локального пользовательского чата")
+
+    def _on_local_chat_window_closed(self) -> None:
+        self.local_chat_window = None
+
     def _open_settings(self) -> None:
         if self._is_busy():
             QMessageBox.information(self, "Подождите", "Менять настройки лучше после завершения текущего запроса.")
@@ -1926,6 +1943,8 @@ class AssistantWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._append_log("INFO", "Приложение закрывается")
+        if self.local_chat_window is not None:
+            self.local_chat_window.close()
         if self.worker is not None and self.worker.isRunning():
             self.worker.wait()
         if self.warmup_worker is not None and self.warmup_worker.isRunning():
@@ -1939,4 +1958,3 @@ def main() -> None:
     window = AssistantWindow()
     window.show()
     app.exec()
-

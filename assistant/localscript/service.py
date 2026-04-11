@@ -412,7 +412,10 @@ class LocalScriptService:
                 "role": "system",
                 "content": (
                     self.knowledge_base.render_rules()
+                    + "\n\n"
+                    + self._self_check_block()
                     + "\n\nИсправь только то, что ломает валидацию. "
+                    + "Пройди repair loop: синтаксис, логика, крайние случаи. "
                     + "Верни только итоговый LocalScript-код без пояснений."
                 ),
             },
@@ -428,6 +431,7 @@ class LocalScriptService:
                     "Проблемы quality gate:\n"
                     f"{issues_text}\n\n"
                     "Исправь только перечисленные проблемы. "
+                    "Проверь выполнимость, семантику и крайние случаи перед ответом. "
                     "Не добавляй markdown, комментарии и пояснения."
                 ),
             },
@@ -449,18 +453,24 @@ class LocalScriptService:
         assumptions: Sequence[str],
         feedback_hints: Sequence[str],
     ) -> list[dict[str, str]]:
-        examples = self.knowledge_base.render_examples(task, limit=3)
+        guidance = self.knowledge_base.render_generation_guidance(task, limit=3)
         optional_blocks: list[str] = []
         if assumptions:
-            optional_blocks.append("Без диалога используй такие безопасные допущения:\n" + "\n".join(f"- {item}" for item in assumptions))
+            optional_blocks.append(
+                "Без диалога используй такие безопасные допущения:\n" + "\n".join(f"- {item}" for item in assumptions)
+            )
         if feedback_hints:
-            optional_blocks.append("Недавний негативный пользовательский фидбек по плохим ответам:\n" + "\n".join(f"- {item}" for item in feedback_hints))
+            optional_blocks.append(
+                "Недавний негативный пользовательский фидбек по плохим ответам:\n"
+                + "\n".join(f"- {item}" for item in feedback_hints)
+            )
         system_prompt = "\n\n".join(
             [
                 self.knowledge_base.render_rules(),
+                self._self_check_block(),
                 self._strategy_prompt(strategy),
                 f"Сводка контекста:\n{self._context_summary(task)}",
-                f"Релевантные примеры:\n{examples}",
+                f"Релевантные сигналы по похожим задачам:\n{guidance}",
                 *optional_blocks,
                 "Отвечай только итоговым кодом LocalScript без пояснений.",
             ]
@@ -491,19 +501,35 @@ class LocalScriptService:
         if strategy == "json_payload":
             return (
                 "Стратегия: верни только JSON-объект. "
-                "Каждое исполняемое Lua-значение должно быть обёрнуто в строку lua{...}lua."
+                "Каждое исполняемое Lua-значение должно быть обёрнуто в строку lua{...}lua. "
+                "Не добавляй лишние поля и не используй шаблонный каркас."
             )
         if strategy == "strict":
             return (
                 "Стратегия: выбери самое короткое корректное решение LocalScript. "
-                "Не придумывай переменные и поля, которых нет в контексте задачи."
+                "Не придумывай переменные и поля, которых нет в контексте задачи. "
+                "Сначала проверь семантику выполнения, потом сокращай код."
             )
         if strategy == "repair_ready":
             return (
                 "Стратегия: подготовь ответ, который легко проходит quality gate. "
-                "Избегай placeholder-ов, markdown, комментариев и примерных литералов из prompt-а."
+                "Избегай placeholder-ов, markdown, комментариев и примерных литералов из prompt-а. "
+                "Если внутренний self-check находит дефект, перепиши ответ до возврата."
             )
-        return "Стратегия: сгенерируй самый прямой и практичный ответ LocalScript для этой задачи."
+        return (
+            "Стратегия: сгенерируй самый прямой и практичный ответ LocalScript для этой задачи. "
+            "Строй решение с нуля по данным задачи, а не по заготовке."
+        )
+
+    def _self_check_block(self) -> str:
+        return (
+            "Внутренний self-check перед ответом:\n"
+            "1. Мысленно проверь синтаксис и luac-level выполнимость.\n"
+            "2. Проверь доступы к wf.vars / wf.initVariables и отсутствие выдуманных переменных.\n"
+            "3. Проверь семантику: входные данные, изменения состояния и точный итоговый output.\n"
+            "4. Проверь крайние случаи: nil, пустой массив, отсутствующее поле, пустая строка.\n"
+            "5. Если найден дефект, пересобери код и верни только исправленную финальную версию."
+        )
 
     def _select_best_candidate(self, candidates: Sequence[_Candidate]) -> _Candidate:
         return max(

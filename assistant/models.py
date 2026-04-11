@@ -128,6 +128,8 @@ class ProjectAgentResult:
     logs: list[ActionLogEntry] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     workspace_root: str = ""
+    review_attempts_used: int = 0
+    unresolved_review_issues: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

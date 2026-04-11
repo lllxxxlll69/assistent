@@ -220,6 +220,8 @@ class Orchestrator:
             extra_metrics={
                 "agent_changed_files": len(result.changed_files),
                 "agent_workspace": result.workspace_root,
+                "agent_review_attempts_used": result.review_attempts_used,
+                "agent_unresolved_review_issues": list(result.unresolved_review_issues),
             },
         )
 
