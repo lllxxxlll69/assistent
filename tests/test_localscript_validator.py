@@ -6,6 +6,7 @@ from pathlib import Path
 
 from assistant.config.settings import SettingsManager
 from assistant.localscript.knowledge import LocalScriptKnowledgeBase
+from assistant.localscript.evaluator import run_eval_suite
 from assistant.localscript.service import LocalScriptService
 from assistant.localscript.templates import LocalScriptTemplateEngine
 from assistant.localscript.validator import LocalScriptValidator
@@ -67,6 +68,12 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(issue.rule == "init_variables" for issue in result.issues))
 
+    def test_reports_structured_check_results(self) -> None:
+        code = "return wf.vars.emails[#wf.vars.emails]"
+        result = self.validator.validate(LAST_EMAIL_TASK, code)
+        self.assertTrue(any(item.name == "luac_parse" for item in result.check_results))
+        self.assertIn(result.luac_status, {"passed", "skipped_with_reason"})
+
 
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
@@ -91,6 +98,21 @@ class LocalScriptKnowledgeTests(unittest.TestCase):
         self.assertIn("_utils.array.new()", rendered)
         self.assertIn("_utils.array.markAsArray(value)", rendered)
 
+    def test_template_engine_handles_direct_variable_return(self) -> None:
+        engine = LocalScriptTemplateEngine()
+        rendered = engine.render('Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}')
+        self.assertEqual(rendered, "return wf.vars.orderId")
+
+    def test_template_engine_builds_json_payload_from_context(self) -> None:
+        engine = LocalScriptTemplateEngine()
+        rendered = engine.render(
+            'Верни JSON payload с полями orderId и customerEmail. '
+            '{"wf":{"vars":{"orderId":"ORD-7","customerEmail":"a@example.com"}}}'
+        )
+        self.assertIsNotNone(rendered)
+        self.assertIn('"orderId":"lua{', rendered)
+        self.assertIn('"customerEmail":"lua{', rendered)
+
 
 class LocalScriptServiceTests(unittest.TestCase):
     def test_requests_clarification_for_ambiguous_short_task(self) -> None:
@@ -104,6 +126,7 @@ class LocalScriptServiceTests(unittest.TestCase):
     def test_uses_previous_code_context_for_refinement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(localscript_candidate_count=1, localscript_repair_attempts=0)
             service = LocalScriptService(
                 settings_manager=manager,
                 llm_client=StubLLMClient(
@@ -132,11 +155,34 @@ class LocalScriptServiceTests(unittest.TestCase):
             )
             service = LocalScriptService(settings_manager=manager, llm_client=llm)
             generation = service.generate(
-                'Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}',
+                'Используй workflow контекст и вытащи orderId. {"wf":{"vars":{"orderId":"123"}}}',
                 allow_clarification=False,
             )
         self.assertEqual(generation.code, "return wf.vars.orderId")
         self.assertEqual(generation.candidate_count, 2)
+
+    def test_judged_mode_uses_assumptions_instead_of_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient(['{"squared":"lua{return 25}lua"}']))
+            generation = service.generate(
+                "Доработай и верни json payload с полем squared.",
+                allow_clarification=False,
+                interaction_mode="judged",
+            )
+        self.assertIsNone(generation.clarification_question)
+        self.assertGreaterEqual(len(generation.assumptions), 1)
+        self.assertTrue(any(item.stage == "assumed" for item in generation.trace))
+
+
+class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_smoke_eval_suite_produces_machine_readable_report(self) -> None:
+        report = await run_eval_suite(smoke_only=True)
+        self.assertEqual(report["suite"], "smoke")
+        self.assertEqual(report["cases_total"], 5)
+        self.assertEqual(report["cases_passed"], 5)
+        self.assertIn("selected_strategy_distribution", report)
+        self.assertIn("luac_status_distribution", report)
 
 
 if __name__ == "__main__":

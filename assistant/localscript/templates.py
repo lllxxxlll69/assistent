@@ -5,22 +5,43 @@ import re
 from typing import Any
 
 
-LAST_MARKERS = ("последн", "last")
-INCREMENT_MARKERS = ("увелич", "счетчик", "increment", "counter")
-ARRAY_MARKERS = ("массив", "array")
-FILTER_MARKERS = ("отфильтр", "filter")
-REFINE_JSON_MARKERS = ("json", "payload", "объект")
+LAST_MARKERS = ("последн", "last", "рџрѕсѓр»рµрґрн")
+INCREMENT_MARKERS = (
+    "увелич",
+    "счётчик",
+    "счетчик",
+    "increment",
+    "counter",
+    "сѓрірµр»рёс‡",
+    "сѓс‡рµс‚с‡рёрє",
+)
+ARRAY_MARKERS = ("массив", "array", "рјр°сѓсѓрёрв")
+FILTER_MARKERS = ("отфильтр", "filter", "рѕс‚с„рёр»сњс‚сђ")
+REFINE_JSON_MARKERS = ("json", "payload", "объект", "рѕр±сљрµрєс‚")
+RETURN_MARKERS = (
+    "верни",
+    "получи",
+    "из workflow",
+    "из контекста",
+    "return",
+    "get",
+    "рірµсђрЅрё",
+    "рїрѕр»сѓс‡рё",
+    "рёр· рєрѕрЅс‚рµрєсѓс‚р°",
+)
 
 
 class LocalScriptTemplateEngine:
     def render(self, task: str) -> str | None:
         for matcher in (
+            self._match_mark_as_array,
+            self._match_ensure_items_are_arrays,
+            self._match_direct_variable_return,
+            self._match_json_selected_fields,
             self._match_last_array_item,
             self._match_increment_variable,
             self._match_cleanup_restbody,
             self._match_iso_datetime,
-            self._match_ensure_items_are_arrays,
-            self._match_mark_as_array,
             self._match_filter_discount_markdown,
             self._match_square_json_payload,
             self._match_unix_time,
@@ -28,6 +49,125 @@ class LocalScriptTemplateEngine:
             result = matcher(task)
             if result is not None:
                 return result
+        return None
+
+    def _match_mark_as_array(self, task: str) -> str | None:
+        lowered = task.lower()
+        mentions_mark_as_array = "markasarray" in lowered
+        asks_to_mark_array = ("помет" in lowered or "рїрѕрјрµс‚" in lowered) and any(
+            marker in lowered for marker in ARRAY_MARKERS
+        )
+        if not mentions_mark_as_array and not asks_to_mark_array:
+            return None
+        target = self._extract_explicit_wf_path(task) or "wf.vars.items"
+        return (
+            f"local arr = {target}\n"
+            "if type(arr) ~= \"table\" then\n"
+            "    local wrapped = _utils.array.new()\n"
+            "    table.insert(wrapped, arr)\n"
+            "    return wrapped\n"
+            "end\n"
+            "return _utils.array.markAsArray(arr)"
+        )
+
+    def _match_ensure_items_are_arrays(self, task: str) -> str | None:
+        lowered = task.lower()
+        if "items" not in lowered or not any(marker in lowered for marker in ARRAY_MARKERS):
+            return None
+        if "zcdf_packages" not in lowered:
+            return None
+        return (
+            "local function ensure_array(value)\n"
+            "    if type(value) ~= \"table\" then\n"
+            "        local arr = _utils.array.new()\n"
+            "        table.insert(arr, value)\n"
+            "        return arr\n"
+            "    end\n"
+            "    local is_array = true\n"
+            "    for key, _ in pairs(value) do\n"
+            "        if type(key) ~= \"number\" or math.floor(key) ~= key then\n"
+            "            is_array = false\n"
+            "            break\n"
+            "        end\n"
+            "    end\n"
+            "    if is_array then\n"
+            "        return _utils.array.markAsArray(value)\n"
+            "    end\n"
+            "    local arr = _utils.array.new()\n"
+            "    table.insert(arr, value)\n"
+            "    return arr\n"
+            "end\n"
+            "for _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n"
+            "    if type(obj) == \"table\" and obj.items ~= nil then\n"
+            "        obj.items = ensure_array(obj.items)\n"
+            "    end\n"
+            "end\n"
+            "return wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES"
+        )
+
+    def _match_json_selected_fields(self, task: str) -> str | None:
+        lowered = task.lower()
+        if not any(marker in lowered for marker in REFINE_JSON_MARKERS):
+            return None
+
+        context = self._extract_json_context(task)
+        wf_vars = self._wf_vars(context)
+        wf_init = self._wf_init_variables(context)
+        selected_fields: list[tuple[str, str]] = []
+
+        for key in wf_vars:
+            if key.lower() in lowered:
+                selected_fields.append((key, f"wf.vars.{key}"))
+        for key in wf_init:
+            if key.lower() in lowered:
+                selected_fields.append((key, f"wf.initVariables.{key}"))
+
+        deduplicated: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for key, path in selected_fields:
+            if key not in seen:
+                deduplicated.append((key, path))
+                seen.add(key)
+
+        if not deduplicated:
+            return None
+
+        parts = [f"\"{key}\":\"lua{{return {path}}}lua\"" for key, path in deduplicated[:4]]
+        return "{" + ",".join(parts) + "}"
+
+    def _match_direct_variable_return(self, task: str) -> str | None:
+        lowered = task.lower()
+        if "markasarray" in lowered or ("помет" in lowered and any(marker in lowered for marker in ARRAY_MARKERS)):
+            return None
+
+        explicit_path = self._extract_explicit_wf_path(task)
+        if explicit_path is not None:
+            return f"return {explicit_path}"
+        if any(marker in lowered for marker in LAST_MARKERS + INCREMENT_MARKERS):
+            return None
+        if any(marker in lowered for marker in REFINE_JSON_MARKERS):
+            return None
+        if not any(marker in lowered for marker in RETURN_MARKERS):
+            return None
+
+        context = self._extract_json_context(task)
+        wf_vars = self._wf_vars(context)
+        wf_init = self._wf_init_variables(context)
+
+        vars_matches = [key for key in wf_vars if key.lower() in lowered]
+        init_matches = [key for key in wf_init if key.lower() in lowered]
+
+        if len(vars_matches) == 1:
+            return f"return wf.vars.{vars_matches[0]}"
+        if len(init_matches) == 1:
+            return f"return wf.initVariables.{init_matches[0]}"
+
+        if len(wf_vars) == 1 and ("workflow" in lowered or "контекст" in lowered or "рєрѕрЅс‚рµрєсѓс‚" in lowered):
+            key = next(iter(wf_vars))
+            return f"return wf.vars.{key}"
+        if len(wf_init) == 1 and ("workflow" in lowered or "контекст" in lowered or "рєрѕрЅс‚рµрєсѓс‚" in lowered):
+            key = next(iter(wf_init))
+            return f"return wf.initVariables.{key}"
         return None
 
     def _match_last_array_item(self, task: str) -> str | None:
@@ -108,56 +248,6 @@ class LocalScriptTemplateEngine:
             "return string.format('%s-%s-%sT%s:%s:%s.00000Z', year, month, day, hour, minute, second)"
         )
 
-    def _match_ensure_items_are_arrays(self, task: str) -> str | None:
-        lowered = task.lower()
-        if "items" not in lowered or not any(marker in lowered for marker in ARRAY_MARKERS):
-            return None
-        if "zcdf_packages" not in lowered:
-            return None
-        return (
-            "local function ensure_array(value)\n"
-            "    if type(value) ~= \"table\" then\n"
-            "        local arr = _utils.array.new()\n"
-            "        table.insert(arr, value)\n"
-            "        return arr\n"
-            "    end\n"
-            "    local is_array = true\n"
-            "    for key, _ in pairs(value) do\n"
-            "        if type(key) ~= \"number\" or math.floor(key) ~= key then\n"
-            "            is_array = false\n"
-            "            break\n"
-            "        end\n"
-            "    end\n"
-            "    if is_array then\n"
-            "        return _utils.array.markAsArray(value)\n"
-            "    end\n"
-            "    local arr = _utils.array.new()\n"
-            "    table.insert(arr, value)\n"
-            "    return arr\n"
-            "end\n"
-            "for _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n"
-            "    if type(obj) == \"table\" and obj.items ~= nil then\n"
-            "        obj.items = ensure_array(obj.items)\n"
-            "    end\n"
-            "end\n"
-            "return wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES"
-        )
-
-    def _match_mark_as_array(self, task: str) -> str | None:
-        lowered = task.lower()
-        if "markasarray" not in lowered and not ("помет" in lowered and any(marker in lowered for marker in ARRAY_MARKERS)):
-            return None
-        target = self._extract_explicit_wf_path(task) or "wf.vars.items"
-        return (
-            f"local arr = {target}\n"
-            "if type(arr) ~= \"table\" then\n"
-            "    local wrapped = _utils.array.new()\n"
-            "    table.insert(wrapped, arr)\n"
-            "    return wrapped\n"
-            "end\n"
-            "return _utils.array.markAsArray(arr)"
-        )
-
     def _match_filter_discount_markdown(self, task: str) -> str | None:
         lowered = task.lower()
         if "discount" not in lowered and "markdown" not in lowered:
@@ -175,7 +265,7 @@ class LocalScriptTemplateEngine:
 
     def _match_square_json_payload(self, task: str) -> str | None:
         lowered = task.lower()
-        if "squared" not in lowered and "квадрат" not in lowered:
+        if "squared" not in lowered and "квадрат" not in lowered and "рєрір°рҙсђр°с‚" not in lowered:
             return None
         if not any(marker in lowered for marker in REFINE_JSON_MARKERS):
             return None

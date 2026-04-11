@@ -138,11 +138,43 @@ class ValidationIssue:
 
 
 @dataclass(slots=True)
+class ValidationCheckResult:
+    name: str
+    status: str
+    detail: str = ""
+
+
+@dataclass(slots=True)
 class ValidationResult:
     is_valid: bool
     normalized_code: str
     issues: list[ValidationIssue] = field(default_factory=list)
     checks: list[str] = field(default_factory=list)
+    check_results: list[ValidationCheckResult] = field(default_factory=list)
+    luac_status: str = "skipped_with_reason"
+    luac_detail: str = ""
+    score_breakdown: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GenerationTraceEntry:
+    stage: str
+    status: str
+    detail: str = ""
+
+
+@dataclass(slots=True)
+class CandidateArtifact:
+    label: str
+    source: str
+    code: str
+    score: int
+    is_valid: bool
+    issues: list[str] = field(default_factory=list)
+    checks: list[str] = field(default_factory=list)
+    luac_status: str = "skipped_with_reason"
+    repair_round: int = 0
+    score_breakdown: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -154,3 +186,7 @@ class LocalScriptGeneration:
     raw_response: str = ""
     selected_strategy: str = "single"
     candidate_count: int = 1
+    assumptions: list[str] = field(default_factory=list)
+    trace: list[GenerationTraceEntry] = field(default_factory=list)
+    candidate_reports: list[CandidateArtifact] = field(default_factory=list)
+    repair_attempts_used: int = 0

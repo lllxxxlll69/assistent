@@ -4,7 +4,7 @@ import json
 import uuid
 from pathlib import Path
 
-from assistant.config.settings import DEFAULT_DATA_DIR, SettingsManager
+from assistant.config.settings import DEFAULT_DATA_DIR, SettingsManager, _write_atomic_text
 from assistant.models import ChatSession, Message, utc_now_iso
 
 
@@ -246,12 +246,10 @@ class MemoryManager:
             "active_session_id": self._active_session_id,
             "sessions": [session.to_dict() for session in self.list_sessions()],
         }
-        temp_path = self.history_path.with_suffix(".tmp")
-        temp_path.write_text(
+        _write_atomic_text(
+            self.history_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        temp_path.replace(self.history_path)
 
     def _should_autorename(self, session: ChatSession) -> bool:
         default_prefix = "Новый чат"

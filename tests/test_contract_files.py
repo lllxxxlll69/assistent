@@ -15,6 +15,12 @@ class ContractFilesTests(unittest.TestCase):
         readme = Path("README.md").read_text(encoding="utf-8")
         self.assertIn("python -m assistant.api", readme)
         self.assertIn("assistant.localscript.self_check", readme)
+        self.assertIn("assistant.localscript.benchmark --suite full", readme)
+
+    def test_contest_evidence_doc_exists(self) -> None:
+        evidence_doc = Path("docs/CONTEST_EVIDENCE.md").read_text(encoding="utf-8")
+        self.assertIn("Eval methodology", evidence_doc)
+        self.assertIn("local-only", evidence_doc)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from assistant.config.settings import SettingsManager
 from assistant.core.agent import Agent
@@ -19,15 +20,17 @@ class AssistantBackend:
     settings_manager: SettingsManager
     memory_manager: MemoryManager
     orchestrator: Orchestrator
-
-
-def build_backend(settings_manager: SettingsManager | None = None) -> AssistantBackend:
+def build_backend(
+    settings_manager: SettingsManager | None = None,
+    *,
+    history_path: Path | str | None = None,
+) -> AssistantBackend:
     manager = settings_manager or SettingsManager()
     settings = manager.get_settings()
     agent = Agent()
 
     llm_client = LLMClient(settings)
-    memory_manager = MemoryManager(manager)
+    memory_manager = MemoryManager(manager, history_path=history_path)
     localscript_service = LocalScriptService(
         settings_manager=manager,
         llm_client=llm_client,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from threading import Lock
@@ -14,7 +16,7 @@ DEFAULT_SETTINGS_PATH = DEFAULT_DATA_DIR / "settings.json"
 
 @dataclass(slots=True)
 class Settings:
-    model: str = "qwen2.5:3b"
+    model: str = "qwen2.5-coder:7b"
     vision_model: str = "qwen3-vl:4b"
     api_url: str = os.getenv("ASSISTANT_API_URL", "http://127.0.0.1:11434/api/chat")
     temperature: float = 0.2
@@ -36,8 +38,8 @@ class Settings:
     localscript_context_size: int = 4096
     localscript_num_predict: int = 256
     localscript_auto_validate: bool = True
-    localscript_repair_attempts: int = 1
-    localscript_candidate_count: int = 2
+    localscript_repair_attempts: int = 2
+    localscript_candidate_count: int = 3
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     api_allowed_origins: str = "http://127.0.0.1,http://localhost"
@@ -95,13 +97,11 @@ class SettingsManager:
 
     def _write(self, settings: Settings) -> None:
         self.ensure_storage()
-        temp_path = self.settings_path.with_suffix(".tmp")
         with self._lock:
-            temp_path.write_text(
+            _write_atomic_text(
+                self.settings_path,
                 json.dumps(asdict(settings), ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
-            temp_path.replace(self.settings_path)
 
     def _apply_env_overrides(self, settings: Settings) -> Settings:
         overrides: dict[str, Any] = {}
@@ -155,3 +155,20 @@ class SettingsManager:
         merged = asdict(settings)
         merged.update(overrides)
         return Settings(**merged)
+
+
+def _write_atomic_text(path: Path, content: str, *, retries: int = 8, delay_seconds: float = 0.03) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    last_error: OSError | None = None
+    for attempt in range(retries):
+        temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(content, encoding="utf-8")
+            temp_path.replace(path)
+            return
+        except OSError as exc:
+            last_error = exc
+            temp_path.unlink(missing_ok=True)
+            time.sleep(delay_seconds * (attempt + 1))
+    if last_error is not None:
+        raise last_error

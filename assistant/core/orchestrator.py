@@ -116,18 +116,14 @@ class Orchestrator:
                     self.localscript_service.generate,
                     user_input,
                     context_messages=self.memory_manager.get_context(),
+                    interaction_mode="interactive",
                 )
                 logs.extend(generation.logs)
                 logs.extend(self._validation_logs(generation.validation.is_valid, generation.validation.issues))
                 return self._finalize_response(
                     generation.code,
                     logs,
-                    extra_metrics={
-                        "validation_checks": len(generation.validation.checks),
-                        "validation_errors": len(generation.validation.issues),
-                        "candidate_count": generation.candidate_count,
-                        "selected_strategy": generation.selected_strategy,
-                    },
+                    extra_metrics=self._localscript_metrics(generation),
                 )
 
             answer = await self._generate_user_visible_response(user_input, retrieval_chunks, on_text_chunk)
@@ -172,6 +168,7 @@ class Orchestrator:
             user_input,
             context_messages=context_messages,
             allow_clarification=allow_clarification,
+            interaction_mode="interactive" if allow_clarification else "judged",
         )
         logs = list(generation.logs)
         logs.extend(self._validation_logs(generation.validation.is_valid, generation.validation.issues))
@@ -180,12 +177,7 @@ class Orchestrator:
             text,
             logs,
             persist_memory=persist_memory,
-            extra_metrics={
-                "validation_checks": len(generation.validation.checks),
-                "validation_errors": len(generation.validation.issues),
-                "candidate_count": generation.candidate_count,
-                "selected_strategy": generation.selected_strategy,
-            },
+            extra_metrics=self._localscript_metrics(generation),
         )
 
     async def generate_project_agent_response(
@@ -295,6 +287,7 @@ class Orchestrator:
                 task,
                 context_messages=self.memory_manager.get_context(),
                 allow_clarification=False,
+                interaction_mode="judged",
             )
             logs = [ActionLogEntry(message="Выполнен автоматический LocalScript-пайплайн")]
             logs.extend(generation.logs)
@@ -302,12 +295,7 @@ class Orchestrator:
             return self._finalize_response(
                 generation.code,
                 logs,
-                extra_metrics={
-                    "validation_checks": len(generation.validation.checks),
-                    "validation_errors": len(generation.validation.issues),
-                    "candidate_count": generation.candidate_count,
-                    "selected_strategy": generation.selected_strategy,
-                },
+                extra_metrics=self._localscript_metrics(generation),
             )
 
         plan = await asyncio.to_thread(
@@ -436,3 +424,19 @@ class Orchestrator:
             message = getattr(issue, "message", str(issue))
             logs.append(ActionLogEntry(message=message, success=False))
         return logs
+
+    def _localscript_metrics(self, generation) -> dict[str, Any]:
+        return {
+            "validation_checks": len(generation.validation.checks),
+            "validation_errors": len(generation.validation.issues),
+            "candidate_count": generation.candidate_count,
+            "selected_strategy": generation.selected_strategy,
+            "luac_status": generation.validation.luac_status,
+            "repair_attempts_used": generation.repair_attempts_used,
+            "assumptions": list(generation.assumptions),
+            "trace": [f"{item.stage}:{item.status}" for item in generation.trace],
+            "strategy_distribution": {
+                item.source: sum(1 for candidate in generation.candidate_reports if candidate.source == item.source)
+                for item in generation.candidate_reports
+            },
+        }

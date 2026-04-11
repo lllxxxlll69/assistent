@@ -2,32 +2,20 @@
   <img src="assets/vomatix.png" width="140"/>
 </p>
 
-<h1>
-  Локальный AI-агент<br>
-  <span style="color:#4FC3F7;">VOMATIX CODE</span><br>
-  для LocalScript
-</h1>
+# Локальный AI-агент VOMATIX CODE для LocalScript
 
-Локальный AI-агент для генерации Lua/LocalScript-кода в защищённом контуре.
+Локальный AI-агент для генерации Lua/LocalScript-кода в защищённом контуре.  
+Проект ориентирован на judged-сценарий `POST /generate` и на локальную интерактивную работу через desktop GUI.
 
-Решение рассчитано на приватную инфраструктуру:
-- локальная open-source модель через Ollama
-- отсутствие внешних AI-вендоров в runtime
-- генерация с учётом правил LocalScript/LowCode
-- автоматическая валидация и одна итерация автоисправления
-- оконный интерфейс для итеративной работы
+## Что реально есть в репозитории
+
+- локальный runtime через Ollama, без внешних AI API в runtime
+- отдельный LocalScript pipeline: шаблоны, правила, валидация, ranking, repair loop
 - HTTP API по контракту `POST /generate`
-
-## Что делает проект
-
-Агент принимает задачу на русском или английском языке, использует лёгкую локальную модель, генерирует LocalScript-совместимый Lua-код, валидирует результат и при необходимости делает одну автоматическую попытку исправления.
-
-Решение адаптировано под LocalScript-домен:
-- использует `wf.vars` и `wf.initVariables`
-- запрещает JsonPath
-- поддерживает `_utils.array.new()` и `_utils.array.markAsArray(arr)`
-- включает локальные доменные примеры из публичной выборки
-- поддерживает итеративное уточнение через desktop UI
+- desktop GUI для итеративной работы
+- eval/benchmark контур с расширенным набором задач и JSON-отчётами
+- self-check для judged-контура и воспроизводимости
+- локальные file/search/vision tools
 
 ## Структура проекта
 
@@ -46,12 +34,17 @@ assistant/
     prompts.py
   localscript/
     benchmark.py
+    eval_cases.py
+    evaluator.py
     knowledge.py
+    self_check.py
     service.py
     templates.py
     validator.py
   memory/
     memory_manager.py
+  project_agent/
+    service.py
   tools/
     file_tools.py
     search_tools.py
@@ -61,120 +54,170 @@ assistant/
 main.py
 Dockerfile
 docker-compose.yml
+requirements.txt
+docs/
+  CONTEST_EVIDENCE.md
 ```
+
+## Judged LocalScript pipeline
+
+Целевой judged path:
+
+1. `POST /generate` принимает `prompt`
+2. API вызывает `orchestrator.generate_localscript_response(...)`
+3. Orchestrator запускает `LocalScriptService`
+4. `LocalScriptService` выполняет:
+   - mode guard для не-Lua запросов
+   - optional assumptions для non-interactive режима
+   - template matching
+   - LLM candidate generation
+   - validation
+   - ranking
+   - focused repair loop
+   - final select
+5. API возвращает только поле `code`
+
+Кодовые точки:
+- [assistant/api/server.py](assistant/api/server.py)
+- [assistant/core/orchestrator.py](assistant/core/orchestrator.py)
+- [assistant/localscript/service.py](assistant/localscript/service.py)
+- [assistant/localscript/validator.py](assistant/localscript/validator.py)
 
 ## Рекомендуемая модель
 
-Точная команда для демо-контура:
+Текущая рекомендуемая модель для judged LocalScript path:
 
 ```bash
-
-ollama pull qwen2.5:3b
+ollama pull qwen2.5-coder:7b
 ```
 
-Фиксированные параметры генерации для LocalScript-режима:
-- `num_ctx=4096`
-- `num_predict=256`
-- `batch=1`
-- `parallel=1` на уровне деплоя через `OLLAMA_NUM_PARALLEL=1`
+Текущий tested/default contour:
+- `model = qwen2.5-coder:7b`
+- `num_ctx = 4096`
+- `num_predict = 256`
+- `batch = 1`
+- `parallel = 1` через `OLLAMA_NUM_PARALLEL=1`
 
-Эти значения зафиксированы в LocalScript pipeline и в Docker-конфигурации.
+Важно:
+- это tested tag, а не digest-pinned artifact модели;
+- если нужен более строгий pinning, его надо фиксировать на стороне окружения Ollama отдельно.
 
 ## Локальный запуск
 
-1. Запустите Ollama.
+1. Поднимите Ollama.
 2. Скачайте модель:
 
 ```bash
-
-ollama pull qwen2.5:3b
+ollama pull qwen2.5-coder:7b
 ```
 
-3. Запустите оконное приложение:
+3. Установите зависимости:
 
 ```bash
+python -m pip install -r requirements.txt
+```
 
+4. Запустите GUI:
+
+```bash
 python main.py
 ```
 
-4. Запустите HTTP API:
+5. Запустите judged API:
 
 ```bash
-
 python -m assistant.api
 ```
 
-Проверка здоровья API:
+## Проверка API
 
 ```bash
-
 curl http://127.0.0.1:8080/health
 ```
 
-Пример генерации кода:
-
 ```bash
-
 curl -X POST http://127.0.0.1:8080/generate ^
   -H "Content-Type: application/json" ^
   -d "{\"prompt\":\"Из полученного списка email получи последний. {\\\"wf\\\":{\\\"vars\\\":{\\\"emails\\\":[\\\"a\\\",\\\"b\\\"]}}}\"}"
 ```
 
-## Однострочный запуск через Docker
+## Docker / compose
 
 ```bash
-
 docker compose up --build
 ```
 
-`docker-compose.yml` поднимает:
-- Ollama
-- загрузку модели через `ollama pull qwen2.5:3b`
-- LocalScript API на порту `8080`
+Что поднимается:
+- `ollama/ollama:0.12.4`
+- загрузка `qwen2.5-coder:7b`
+- API-контур на `:8080`
 
-## Публичный benchmark
+Базовый образ приложения:
+- `python:3.11-slim-bookworm`
 
-Локальная smoke-проверка на публичных задачах:
+## Smoke benchmark
+
+Быстрый запуск небольшого smoke-suite:
 
 ```bash
-
-python -m assistant.localscript.benchmark
+python -m assistant.localscript.benchmark --suite smoke
 ```
+
+## Полный eval
+
+Расширенный eval-набор с машинно-читаемым отчётом:
+
+```bash
+python -m assistant.localscript.benchmark --suite full --json-out artifacts/localscript_eval_report.json
+```
+
+Отчёт содержит:
+- `pass_rate`
+- breakdown по категориям
+- распределение стратегий
+- распределение `luac_status`
+- причины падений
+- метрики repair/assumptions
 
 ## Self-check
 
-Проверка judging-контура, фиксированных параметров и публичного benchmark:
+Быстрая проверка judged-контура:
 
 ```bash
-
 python -m assistant.localscript.self_check
+```
+
+Расширенная проверка с полным eval:
+
+```bash
+python -m assistant.localscript.self_check --full-eval
 ```
 
 ## Тесты
 
-Запуск автоматических проверок:
+Обычные deterministic tests:
 
 ```bash
-
 python -m unittest discover -s tests -v
 ```
 
-## Контракт API
+Опциональные live-тесты против реального Ollama:
 
-Контракт включён в репозиторий:
-
-```text
-assistant/api/openapi.yaml
+```bash
+set ASSISTANT_RUN_LIVE_OLLAMA_TESTS=1
+python -m unittest discover -s tests -v
 ```
 
-Сервер реализует:
-- `POST /generate`
-- `GET /health`
-- `GET /openapi.yaml`
+## Ограничения
 
-## Важно
+- Проект не доказывает семантическую корректность всех возможных LocalScript-задач.
+- `luac`-проверка включается только если `luac` доступен в `PATH`.
+- Лёгкая модель ограничивает качество на сложных нестандартных кейсах.
+- Часть надёжности достигается шаблонами и доменными эвристиками, а не только LLM.
+- Модель в Ollama не pinned по digest внутри репозитория.
 
-- Runtime использует только локальный Ollama.
-- OpenAI, Anthropic и другие внешние AI API для генерации не используются.
-- Оконный интерфейс сохранён для итеративной доработки результата.
-- Основной judging-интерфейс для проверки решения: HTTP API.
+## Для жюри
+
+Отдельный краткий документ по judged pipeline, eval methodology и reproducibility:
+
+- [docs/CONTEST_EVIDENCE.md](docs/CONTEST_EVIDENCE.md)

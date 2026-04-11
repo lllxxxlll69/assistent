@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.12.4}
     ports:
       - "11434:11434"
     volumes:
@@ -18,12 +18,12 @@ services:
               capabilities: [gpu]
 
   ollama_init:
-    image: ollama/ollama:latest
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.12.4}
     depends_on:
       - ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:3b}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5-coder:7b}
     entrypoint: ["/bin/sh", "-lc"]
     command: >
       until ollama list >/dev/null 2>&1; do sleep 2; done &&
@@ -37,7 +37,7 @@ services:
         condition: service_completed_successfully
     environment:
       ASSISTANT_API_URL: http://ollama:11434/api/chat
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:3b}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5-coder:7b}
       ASSISTANT_CONTEXT_SIZE: "4096"
       ASSISTANT_MAX_TOKENS: "256"
       ASSISTANT_LOCALSCRIPT_CONTEXT_SIZE: "4096"
