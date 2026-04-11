@@ -21,16 +21,14 @@ Pipeline состоит из следующих этапов:
 
 1. mode guard для не-Lua запросов
 2. clarification/assumption decision
-3. template matching
-4. LLM candidate generation
-5. validation
-6. ranking
-7. focused repair loop
-8. final quality gate
+3. LLM candidate generation
+4. validation
+5. ranking
+6. focused repair loop
+7. final quality gate
 
 Файлы:
 - `assistant/localscript/service.py`
-- `assistant/localscript/templates.py`
 - `assistant/localscript/knowledge.py`
 - `assistant/localscript/validator.py`
 

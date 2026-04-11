@@ -277,7 +277,7 @@ class LocalScriptValidator:
             "info_penalty": -sum(6 for issue in validation.issues if issue.severity != "error"),
             "shape_bonus": 6 if normalized_code.lstrip().startswith(("return", "local", "{", "function", "if")) else 0,
             "luac": 12 if validation.luac_status == "passed" else (-16 if validation.luac_status == "failed" else -3),
-            "provenance": 8 if source == "template" else (4 if source == "repair" else 0),
+            "provenance": 4 if source == "repair" else 0,
             "repair_round": max(0, 6 - (repair_round * 2)),
             "length_penalty": -min(len(normalized_code) // 700, 8),
         }

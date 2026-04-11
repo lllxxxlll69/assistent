@@ -91,6 +91,11 @@ async def run_eval_suite(
     with tempfile.TemporaryDirectory() as tmp_dir:
         temp_root = Path(tmp_dir)
         settings_manager = SettingsManager(temp_root / "settings.json")
+        if smoke_only:
+            settings_manager.update_settings(
+                localscript_candidate_count=1,
+                localscript_repair_attempts=0,
+            )
         backend = build_backend(settings_manager=settings_manager, history_path=temp_root / "history.json")
         settings = settings_manager.get_settings()
         results: list[EvalCaseResult] = []

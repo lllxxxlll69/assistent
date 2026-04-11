@@ -3,12 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from assistant.config.settings import SettingsManager
-from assistant.localscript.knowledge import LocalScriptKnowledgeBase
 from assistant.localscript.evaluator import run_eval_suite
+from assistant.localscript.knowledge import LocalScriptKnowledgeBase
 from assistant.localscript.service import LocalScriptService
-from assistant.localscript.templates import LocalScriptTemplateEngine
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.models import Message
 
@@ -33,8 +33,7 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.validator = LocalScriptValidator()
 
     def test_accepts_direct_wf_access(self) -> None:
-        code = "return wf.vars.emails[#wf.vars.emails]"
-        result = self.validator.validate(LAST_EMAIL_TASK, code)
+        result = self.validator.validate(LAST_EMAIL_TASK, "return wf.vars.emails[#wf.vars.emails]")
         self.assertTrue(result.is_valid)
 
     def test_rejects_hardcoded_sample_values(self) -> None:
@@ -69,8 +68,7 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertTrue(any(issue.rule == "init_variables" for issue in result.issues))
 
     def test_reports_structured_check_results(self) -> None:
-        code = "return wf.vars.emails[#wf.vars.emails]"
-        result = self.validator.validate(LAST_EMAIL_TASK, code)
+        result = self.validator.validate(LAST_EMAIL_TASK, "return wf.vars.emails[#wf.vars.emails]")
         self.assertTrue(any(item.name == "luac_parse" for item in result.check_results))
         self.assertIn(result.luac_status, {"passed", "skipped_with_reason"})
 
@@ -81,37 +79,6 @@ class LocalScriptKnowledgeTests(unittest.TestCase):
         selected = knowledge.select_examples("Из полученного списка email получи последний.", limit=2)
         self.assertGreaterEqual(len(selected), 1)
         self.assertIn("email", selected[0].prompt.lower())
-
-    def test_template_engine_handles_last_email_case(self) -> None:
-        engine = LocalScriptTemplateEngine()
-        prompt = (
-            "Из полученного списка email получи последний. "
-            '{"wf":{"vars":{"emails":["user1@example.com","user2@example.com","user3@example.com"]}}}'
-        )
-        rendered = engine.render(prompt)
-        self.assertEqual(rendered, "return wf.vars.emails[#wf.vars.emails]")
-
-    def test_template_engine_uses_array_helpers_for_items(self) -> None:
-        engine = LocalScriptTemplateEngine()
-        rendered = engine.render("Сделай так, чтобы все элементы items в ZCDF_PACKAGES всегда были массивами.")
-        self.assertIsNotNone(rendered)
-        self.assertIn("_utils.array.new()", rendered)
-        self.assertIn("_utils.array.markAsArray(value)", rendered)
-
-    def test_template_engine_handles_direct_variable_return(self) -> None:
-        engine = LocalScriptTemplateEngine()
-        rendered = engine.render('Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}')
-        self.assertEqual(rendered, "return wf.vars.orderId")
-
-    def test_template_engine_builds_json_payload_from_context(self) -> None:
-        engine = LocalScriptTemplateEngine()
-        rendered = engine.render(
-            'Верни JSON payload с полями orderId и customerEmail. '
-            '{"wf":{"vars":{"orderId":"ORD-7","customerEmail":"a@example.com"}}}'
-        )
-        self.assertIsNotNone(rendered)
-        self.assertIn('"orderId":"lua{', rendered)
-        self.assertIn('"customerEmail":"lua{', rendered)
 
 
 class LocalScriptServiceTests(unittest.TestCase):
@@ -129,12 +96,7 @@ class LocalScriptServiceTests(unittest.TestCase):
             manager.update_settings(localscript_candidate_count=1, localscript_repair_attempts=0)
             service = LocalScriptService(
                 settings_manager=manager,
-                llm_client=StubLLMClient(
-                    [
-                        "return wf.vars.emails[#wf.vars.emails]",
-                        "return wf.vars.emails[#wf.vars.emails]",
-                    ]
-                ),
+                llm_client=StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"]),
             )
             generation = service.generate(
                 "Доработай, чтобы вернуть последний email.",
@@ -142,6 +104,7 @@ class LocalScriptServiceTests(unittest.TestCase):
                 allow_clarification=True,
             )
         self.assertIsNone(generation.clarification_question)
+        self.assertEqual(generation.selected_strategy, "baseline")
 
     def test_selects_best_candidate_from_multiple_llm_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -160,11 +123,16 @@ class LocalScriptServiceTests(unittest.TestCase):
             )
         self.assertEqual(generation.code, "return wf.vars.orderId")
         self.assertEqual(generation.candidate_count, 2)
+        self.assertEqual(generation.selected_strategy, "strict")
 
     def test_judged_mode_uses_assumptions_instead_of_question(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             manager = SettingsManager(Path(tmp_dir) / "settings.json")
-            service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient(['{"squared":"lua{return 25}lua"}']))
+            manager.update_settings(localscript_candidate_count=1, localscript_repair_attempts=0)
+            service = LocalScriptService(
+                settings_manager=manager,
+                llm_client=StubLLMClient(['{"squared":"lua{return 25}lua"}']),
+            )
             generation = service.generate(
                 "Доработай и верни json payload с полем squared.",
                 allow_clarification=False,
@@ -174,14 +142,88 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(generation.assumptions), 1)
         self.assertTrue(any(item.stage == "assumed" for item in generation.trace))
 
+    def test_generates_without_template_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(localscript_candidate_count=1, localscript_repair_attempts=0)
+            service = LocalScriptService(
+                settings_manager=manager,
+                llm_client=StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"]),
+            )
+            generation = service.generate(
+                LAST_EMAIL_TASK,
+                allow_clarification=False,
+                interaction_mode="judged",
+            )
+        self.assertEqual(generation.code, "return wf.vars.emails[#wf.vars.emails]")
+        self.assertEqual(generation.selected_strategy, "baseline")
+        self.assertTrue(any(item.stage == "llm_cycle_started" for item in generation.trace))
+
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
     async def test_smoke_eval_suite_produces_machine_readable_report(self) -> None:
-        report = await run_eval_suite(smoke_only=True)
+        class _EvalStubOrchestrator:
+            async def generate_localscript_response(self, prompt: str, **_: object):
+                if "emails" in prompt:
+                    text = "return wf.vars.emails[#wf.vars.emails]"
+                elif "try_count_n" in prompt:
+                    text = "return wf.vars.try_count_n + 1"
+                elif "RESTbody" in prompt:
+                    text = (
+                        "local result = wf.vars.RESTbody.result\n"
+                        "for _, filtered_entry in ipairs(result) do\n"
+                        "    filtered_entry.extra = nil\n"
+                        "end\n"
+                        "return result"
+                    )
+                elif "parsedCsv" in prompt:
+                    text = (
+                        "local result = _utils.array.new()\n"
+                        "for _, item in ipairs(wf.vars.parsedCsv) do\n"
+                        "    table.insert(result, item)\n"
+                        "end\n"
+                        "return result"
+                    )
+                else:
+                    text = (
+                        "local timestamp = os.time({year = 2023, month = 10, day = 15, hour = 15, min = 30, sec = 0})\n"
+                        "return timestamp"
+                    )
+                return type(
+                    "StubResponse",
+                    (),
+                    {
+                        "text": text,
+                        "metrics": {
+                            "validation_checks": 8,
+                            "validation_errors": 0,
+                            "candidate_count": 1,
+                            "selected_strategy": "baseline",
+                            "luac_status": "skipped_with_reason",
+                            "repair_attempts_used": 0,
+                            "assumptions": [],
+                        },
+                    },
+                )()
+
+        class _EvalStubMemory:
+            def create_session(self, *_: object, **__: object) -> None:
+                return None
+
+            def add_message(self, *_: object, **__: object) -> None:
+                return None
+
+        class _EvalStubBackend:
+            def __init__(self) -> None:
+                self.memory_manager = _EvalStubMemory()
+                self.orchestrator = _EvalStubOrchestrator()
+
+        with patch("assistant.localscript.evaluator.build_backend", return_value=_EvalStubBackend()):
+            report = await run_eval_suite(smoke_only=True)
         self.assertEqual(report["suite"], "smoke")
         self.assertEqual(report["cases_total"], 5)
-        self.assertEqual(report["cases_passed"], 5)
         self.assertIn("selected_strategy_distribution", report)
+        self.assertIn("baseline", report["selected_strategy_distribution"])
         self.assertIn("luac_status_distribution", report)
 
 

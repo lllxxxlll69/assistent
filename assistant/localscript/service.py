@@ -5,13 +5,11 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from assistant.config.settings import SettingsManager
 from assistant.llm.client import LLMClient
 from assistant.localscript.knowledge import LocalScriptKnowledgeBase
-from assistant.localscript.templates import LocalScriptTemplateEngine
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.models import (
     ActionLogEntry,
@@ -70,13 +68,11 @@ class LocalScriptService:
         llm_client: LLMClient,
         knowledge_base: LocalScriptKnowledgeBase | None = None,
         validator: LocalScriptValidator | None = None,
-        template_engine: LocalScriptTemplateEngine | None = None,
     ) -> None:
         self.settings_manager = settings_manager
         self.llm_client = llm_client
         self.knowledge_base = knowledge_base or LocalScriptKnowledgeBase()
         self.validator = validator or LocalScriptValidator()
-        self.template_engine = template_engine or LocalScriptTemplateEngine()
 
     def generate(
         self,
@@ -178,72 +174,17 @@ class LocalScriptService:
                 trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
                 logs.append(ActionLogEntry(message=f"Использовано допущение: {assumption}"))
 
-        template_code = self.template_engine.render(task)
-        template_candidate: _Candidate | None = None
-        if template_code is not None:
-            template_candidate = self._build_candidate(
-                task=task,
-                label="template",
-                source="template",
-                raw_response=template_code,
-            )
-            candidate_reports.append(self._to_candidate_artifact(template_candidate))
-            logs.append(
-                ActionLogEntry(
-                    message=(
-                        "Задача обработана шаблонным движком LocalScript "
-                        f"(score={template_candidate.score}, luac={template_candidate.validation.luac_status})."
-                    ),
-                    success=template_candidate.validation.is_valid,
-                )
-            )
-            trace.append(
-                GenerationTraceEntry(
-                    stage="template_selected",
-                    status="candidate_ready",
-                    detail=f"score={template_candidate.score}",
-                )
-            )
-            if template_candidate.validation.is_valid:
-                logs.extend(self._validation_issue_logs(template_candidate.validation))
-                trace.append(
-                    GenerationTraceEntry(
-                        stage="final_selected",
-                        status="passed",
-                        detail="Выбран валидный шаблонный кандидат.",
-                    )
-                )
-                return LocalScriptGeneration(
-                    code=template_candidate.validation.normalized_code,
-                    validation=template_candidate.validation,
-                    logs=logs,
-                    clarification_question=None,
-                    raw_response=template_code,
-                    selected_strategy="template",
-                    candidate_count=1,
-                    assumptions=assumptions,
-                    trace=trace,
-                    candidate_reports=candidate_reports,
-                    repair_attempts_used=repair_attempts_used,
-                )
-            logs.append(
-                ActionLogEntry(
-                    message="Шаблон не прошёл валидацию, переключаюсь на генерацию кандидатов через LLM.",
-                    success=False,
-                )
-            )
-            trace.append(
-                GenerationTraceEntry(
-                    stage="validation_failed",
-                    status="failed",
-                    detail="Шаблонный кандидат не прошёл quality gate.",
-                )
-            )
-
         settings = self.settings_manager.get_settings()
         feedback_hints = self._feedback_hints()
         candidates: list[_Candidate] = []
         candidate_labels = self._candidate_labels(task, settings.localscript_candidate_count)
+        trace.append(
+            GenerationTraceEntry(
+                stage="llm_cycle_started",
+                status="running",
+                detail=f"candidate_count={len(candidate_labels)}",
+            )
+        )
         for label in candidate_labels:
             raw_response = self._generate_once(
                 task=task,
@@ -271,9 +212,6 @@ class LocalScriptService:
                     success=candidate.validation.is_valid,
                 )
             )
-
-        if template_candidate is not None:
-            candidates.append(template_candidate)
 
         best_candidate = self._select_best_candidate(candidates)
         logs.append(ActionLogEntry(message=f"Предварительно выбрана стратегия LocalScript '{best_candidate.label}'.")) 

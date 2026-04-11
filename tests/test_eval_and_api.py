@@ -8,6 +8,7 @@ import unittest
 import os
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 from urllib import request as urllib_request
 
 from assistant.api.server import LocalScriptAPIHandler
@@ -24,7 +25,7 @@ class _StubOrchestrator:
                 "validation_checks": 8,
                 "validation_errors": 0,
                 "candidate_count": 1,
-                "selected_strategy": "template",
+                "selected_strategy": "baseline",
                 "luac_status": "skipped_with_reason",
             },
         )
@@ -38,7 +39,13 @@ class _StubBackend:
 
 class EvalAndAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_self_check_returns_structured_statuses(self) -> None:
-        report = await run_self_check(run_full_eval=False)
+        stub_smoke_report = {
+            "cases_total": 5,
+            "cases_passed": 5,
+            "pass_rate": 100.0,
+        }
+        with patch("assistant.localscript.self_check.run_eval_suite", return_value=stub_smoke_report):
+            report = await run_self_check(run_full_eval=False)
         statuses = {item["name"]: item["status"] for item in report["checks"]}
         self.assertIn(statuses["smoke_eval"], {"passed", "failed"})
         self.assertEqual(statuses["full_eval"], "skipped_with_reason")

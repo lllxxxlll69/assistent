@@ -39,7 +39,6 @@ assistant/
     knowledge.py
     self_check.py
     service.py
-    templates.py
     validator.py
   memory/
     memory_manager.py
@@ -69,7 +68,6 @@ docs/
 4. `LocalScriptService` выполняет:
    - mode guard для не-Lua запросов
    - optional assumptions для non-interactive режима
-   - template matching
    - LLM candidate generation
    - validation
    - ranking
