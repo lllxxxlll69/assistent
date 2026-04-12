@@ -47,6 +47,12 @@ NON_LUA_LANGUAGE_PATTERNS: dict[str, tuple[str, ...]] = {
     "Kotlin": (r"\bkotlin\b",),
     "Swift": (r"\bswift\b",),
 }
+LAST_MARKERS = ("последн", "last")
+INCREMENT_MARKERS = ("увелич", "increment", "счетчик", "counter")
+REST_CLEANUP_MARKERS = ("rest", "restbody", "entity_id")
+ARRAY_FILTER_MARKERS = ("discount", "markdown", "parsedcsv")
+UNIX_TIME_MARKERS = ("recalltime", "unix", "timestamp")
+ISO_TIME_MARKERS = ("iso 8601", "yyyymmdd", "hhmmss", "datum", "time")
 MAX_ASSUMPTIONS = 2
 
 
@@ -92,6 +98,12 @@ class LocalScriptService:
         unsupported_language = self._detect_unsupported_language(task)
         if unsupported_language is not None:
             response_text = self._build_mode_guard_message(unsupported_language)
+            validation = ValidationResult(
+                is_valid=True,
+                normalized_code=response_text,
+                checks=["mode_guard"],
+                check_results=[ValidationCheckResult(name="mode_guard", status="passed", detail=unsupported_language)],
+            )
             logs.append(
                 ActionLogEntry(
                     message=f"Остановлена LocalScript-генерация: запрос относится к языку {unsupported_language}.",
@@ -102,14 +114,8 @@ class LocalScriptService:
                 GenerationTraceEntry(
                     stage="mode_guard",
                     status="passed",
-                    detail=f"LocalScript-режим не поддерживает запросы на языке {unsupported_language}.",
+                    detail=f"LocalScript mode does not support {unsupported_language} requests.",
                 )
-            )
-            validation = ValidationResult(
-                is_valid=True,
-                normalized_code=response_text,
-                checks=["mode_guard"],
-                check_results=[ValidationCheckResult(name="mode_guard", status="passed", detail=unsupported_language)],
             )
             return LocalScriptGeneration(
                 code=response_text,
@@ -135,25 +141,13 @@ class LocalScriptService:
                     ValidationCheckResult(
                         name="clarification_requested",
                         status="passed",
-                        detail="Запрошено уточнение из-за неоднозначности входа.",
+                        detail="Need more context before generating judged LocalScript.",
                     )
                 ],
-                issues=[
-                    ValidationIssue(
-                        rule="clarification",
-                        message="Нужен дополнительный контекст пользователя.",
-                        severity="info",
-                    )
-                ],
+                issues=[ValidationIssue(rule="clarification", message="Need additional user context.", severity="info")],
             )
             logs.append(ActionLogEntry(message="Перед генерацией запрошено уточнение."))
-            trace.append(
-                GenerationTraceEntry(
-                    stage="clarified",
-                    status="requested",
-                    detail=clarification_question,
-                )
-            )
+            trace.append(GenerationTraceEntry(stage="clarified", status="requested", detail=clarification_question))
             return LocalScriptGeneration(
                 code=clarification_question,
                 validation=validation,
@@ -171,21 +165,16 @@ class LocalScriptService:
         if clarification_question:
             assumptions = self._derive_assumptions(task, context_messages)
             for assumption in assumptions:
-                trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
                 logs.append(ActionLogEntry(message=f"Использовано допущение: {assumption}"))
+                trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
 
         settings = self.settings_manager.get_settings()
         feedback_hints = self._feedback_hints()
         candidates: list[_Candidate] = []
-        candidate_labels = self._candidate_labels(task, settings.localscript_candidate_count)
-        trace.append(
-            GenerationTraceEntry(
-                stage="llm_cycle_started",
-                status="running",
-                detail=f"candidate_count={len(candidate_labels)}",
-            )
-        )
-        for label in candidate_labels:
+        labels = self._candidate_labels(task, settings.localscript_candidate_count)
+        trace.append(GenerationTraceEntry(stage="llm_cycle_started", status="running", detail=f"candidate_count={len(labels)}"))
+
+        for label in labels:
             raw_response = self._generate_once(
                 task=task,
                 context_messages=context_messages,
@@ -196,6 +185,15 @@ class LocalScriptService:
             candidate = self._build_candidate(task=task, label=label, source="llm", raw_response=raw_response)
             candidates.append(candidate)
             candidate_reports.append(self._to_candidate_artifact(candidate))
+            logs.append(
+                ActionLogEntry(
+                    message=(
+                        f"Сгенерирован кандидат LocalScript '{label}' "
+                        f"(score={candidate.score}, valid={candidate.validation.is_valid}, luac={candidate.validation.luac_status})"
+                    ),
+                    success=candidate.validation.is_valid,
+                )
+            )
             trace.append(
                 GenerationTraceEntry(
                     stage="llm_generated",
@@ -203,22 +201,12 @@ class LocalScriptService:
                     detail=f"{label}: score={candidate.score}, valid={candidate.validation.is_valid}",
                 )
             )
-            logs.append(
-                ActionLogEntry(
-                    message=(
-                        f"Сгенерирован кандидат LocalScript '{label}' "
-                        f"(score={candidate.score}, luac={candidate.validation.luac_status})"
-                    ),
-                    success=candidate.validation.is_valid,
-                )
-            )
 
         best_candidate = self._select_best_candidate(candidates)
-        logs.append(ActionLogEntry(message=f"Предварительно выбрана стратегия LocalScript '{best_candidate.label}'.")) 
+        logs.append(ActionLogEntry(message=f"Предварительно выбрана стратегия LocalScript '{best_candidate.label}'."))
 
         if settings.localscript_auto_validate and not best_candidate.validation.is_valid:
-            repair_pool = self._repair_pool(candidates)
-            for candidate in repair_pool:
+            for candidate in self._repair_pool(candidates):
                 current = candidate
                 for attempt in range(1, settings.localscript_repair_attempts + 1):
                     repair_attempts_used += 1
@@ -238,45 +226,38 @@ class LocalScriptService:
                     )
                     candidates.append(repaired)
                     candidate_reports.append(self._to_candidate_artifact(repaired))
-                    current_best_before = self._select_best_candidate(candidates)
+                    logs.append(
+                        ActionLogEntry(
+                            message=(
+                                f"Repair candidate '{repaired.label}' "
+                                f"(score={repaired.score}, valid={repaired.validation.is_valid}, luac={repaired.validation.luac_status})"
+                            ),
+                            success=repaired.validation.is_valid,
+                        )
+                    )
                     trace.append(
                         GenerationTraceEntry(
                             stage="repaired",
                             status="candidate_ready",
-                            detail=(
-                                f"{repaired.label}: score={repaired.score}, "
-                                f"valid={repaired.validation.is_valid}, luac={repaired.validation.luac_status}"
-                            ),
+                            detail=f"{repaired.label}: score={repaired.score}, valid={repaired.validation.is_valid}",
                         )
                     )
-                    if repaired.validation.is_valid:
-                        logs.append(ActionLogEntry(message=f"Попытка исправления {attempt} дала валидный результат."))
-                    else:
-                        logs.append(
-                            ActionLogEntry(
-                                message=f"Попытка исправления {attempt} не прошла quality gate.",
-                                success=False,
-                            )
-                        )
                     if repaired.validation.is_valid:
                         break
                     if repaired.score <= current.score:
                         break
                     current = repaired
-                    best_candidate = current_best_before
 
         best_candidate = self._select_best_candidate(candidates)
         validation = best_candidate.validation
-        raw_response = best_candidate.raw_response
-        selected_strategy = best_candidate.label
-        logs.append(ActionLogEntry(message=f"Выбрана финальная стратегия LocalScript '{selected_strategy}'.")) 
+        logs.append(ActionLogEntry(message=f"Выбрана финальная стратегия LocalScript '{best_candidate.label}'.")) 
         logs.extend(self._validation_issue_logs(validation))
         if not validation.is_valid:
             trace.append(
                 GenerationTraceEntry(
                     stage="validation_failed",
                     status="failed",
-                    detail=f"Финальный кандидат содержит {len(validation.issues)} ошибок валидации.",
+                    detail=f"final_issues={len(validation.issues)}",
                 )
             )
         trace.append(
@@ -295,8 +276,8 @@ class LocalScriptService:
             validation=validation,
             logs=logs,
             clarification_question=None,
-            raw_response=raw_response,
-            selected_strategy=selected_strategy,
+            raw_response=best_candidate.raw_response,
+            selected_strategy=best_candidate.label,
             candidate_count=len(candidates),
             assumptions=assumptions,
             trace=trace,
@@ -355,12 +336,15 @@ class LocalScriptService:
         ]
 
     def _candidate_labels(self, task: str, candidate_count: int) -> list[str]:
+        family = self._task_family(task)
         labels: list[str] = ["baseline"]
-        if any(marker in task.lower() for marker in JSON_RESULT_PHRASES):
+        if family in {"selection_last", "increment", "datetime_unix", "datetime_iso", "direct_return"}:
+            labels.append("return_first")
+        if family in {"rest_cleanup", "array_filter", "array_helpers"}:
+            labels.append("domain_strict")
+        if family == "json_payload":
             labels.append("json_payload")
-        labels.append("strict")
-        labels.append("repair_ready")
-
+        labels.extend(["strict", "repair_ready"])
         deduplicated: list[str] = []
         for label in labels:
             if label not in deduplicated:
@@ -390,6 +374,7 @@ class LocalScriptService:
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
+            temperature_override=settings.localscript_temperature,
         )
 
     def _repair(
@@ -402,11 +387,12 @@ class LocalScriptService:
         assumptions: Sequence[str],
     ) -> str:
         settings = self.settings_manager.get_settings()
-        top_errors = validation.issues[:4]
-        issues_text = "\n".join(f"- [{issue.rule}] {issue.message}" for issue in top_errors) or "- Нет ошибок."
+        top_errors = validation.issues[:5]
+        issues_text = "\n".join(f"- [{issue.rule}] {issue.message}" for issue in top_errors) or "- No issues."
         assumptions_block = ""
         if assumptions:
-            assumptions_block = "Допущения:\n" + "\n".join(f"- {item}" for item in assumptions) + "\n\n"
+            assumptions_block = "Assumptions:\n" + "\n".join(f"- {item}" for item in assumptions) + "\n\n"
+        reference_examples = self.knowledge_base.render_examples(task, limit=1)
         messages = [
             {
                 "role": "system",
@@ -414,9 +400,10 @@ class LocalScriptService:
                     self.knowledge_base.render_rules()
                     + "\n\n"
                     + self._self_check_block()
-                    + "\n\nИсправь только то, что ломает валидацию. "
-                    + "Пройди repair loop: синтаксис, логика, крайние случаи. "
-                    + "Верни только итоговый LocalScript-код без пояснений."
+                    + "\n\n"
+                    + self._task_contract(task)
+                    + "\n\nRepair only the failing parts. Keep the result minimal and executable. "
+                    + "Never use print() for final judged output. Return the final value instead."
                 ),
             },
             *self._context_messages(context_messages),
@@ -424,15 +411,16 @@ class LocalScriptService:
                 "role": "user",
                 "content": (
                     f"{assumptions_block}"
-                    "Исходная задача:\n"
+                    "Original task:\n"
                     f"{task}\n\n"
-                    "Текущий код:\n"
+                    "Reference shape for a similar task:\n"
+                    f"{reference_examples}\n\n"
+                    "Current code:\n"
                     f"{candidate_code}\n\n"
-                    "Проблемы quality gate:\n"
+                    "Quality-gate failures:\n"
                     f"{issues_text}\n\n"
-                    "Исправь только перечисленные проблемы. "
-                    "Проверь выполнимость, семантику и крайние случаи перед ответом. "
-                    "Не добавляй markdown, комментарии и пояснения."
+                    "Fix the exact failures and preserve task semantics. "
+                    "Return only final LocalScript code. No markdown, no comments, no explanations, no print()."
                 ),
             },
         ]
@@ -442,6 +430,7 @@ class LocalScriptService:
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
+            temperature_override=settings.localscript_temperature,
         )
 
     def _build_generation_messages(
@@ -454,25 +443,28 @@ class LocalScriptService:
         feedback_hints: Sequence[str],
     ) -> list[dict[str, str]]:
         guidance = self.knowledge_base.render_generation_guidance(task, limit=3)
+        examples = self.knowledge_base.render_examples(task, limit=2)
         optional_blocks: list[str] = []
         if assumptions:
-            optional_blocks.append(
-                "Без диалога используй такие безопасные допущения:\n" + "\n".join(f"- {item}" for item in assumptions)
-            )
+            optional_blocks.append("Assumptions:\n" + "\n".join(f"- {item}" for item in assumptions))
         if feedback_hints:
-            optional_blocks.append(
-                "Недавний негативный пользовательский фидбек по плохим ответам:\n"
-                + "\n".join(f"- {item}" for item in feedback_hints)
-            )
+            optional_blocks.append("Recent negative user feedback patterns:\n" + "\n".join(f"- {item}" for item in feedback_hints))
+
         system_prompt = "\n\n".join(
             [
                 self.knowledge_base.render_rules(),
                 self._self_check_block(),
+                self._task_contract(task),
                 self._strategy_prompt(strategy),
-                f"Сводка контекста:\n{self._context_summary(task)}",
-                f"Релевантные сигналы по похожим задачам:\n{guidance}",
+                f"Context summary:\n{self._context_summary(task)}",
+                f"Task-family signals:\n{guidance}",
+                (
+                    "Reference implementations for similar task shapes. "
+                    "Adapt the structure, but never copy identifiers or sample literals that are absent from the current task:\n"
+                    f"{examples}"
+                ),
                 *optional_blocks,
-                "Отвечай только итоговым кодом LocalScript без пояснений.",
+                "Return only final LocalScript code. No markdown, no comments, no explanations, no print().",
             ]
         )
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -481,11 +473,11 @@ class LocalScriptService:
             {
                 "role": "user",
                 "content": (
-                    "Задача:\n"
+                    "Task:\n"
                     f"{task}\n\n"
-                    "Верни только финальный результат LocalScript. "
-                    "Не объясняй решение. "
-                    "Если в задаче есть workflow-контекст, используй wf.vars или wf.initVariables."
+                    "Generate the final LocalScript now. "
+                    "Use wf.vars / wf.initVariables when context is provided. "
+                    "Return the final value instead of printing it."
                 ),
             }
         )
@@ -498,37 +490,43 @@ class LocalScriptService:
         return [{"role": item.role, "content": item.content} for item in relevant]
 
     def _strategy_prompt(self, strategy: str) -> str:
+        if strategy == "return_first":
+            return (
+                "Strategy: optimize for judged output shape. "
+                "Use return as the final operation. Do not use print(), logs, or mutation-only answers."
+            )
+        if strategy == "domain_strict":
+            return (
+                "Strategy: follow the domain-specific structure exactly. "
+                "Prefer the canonical workflow path and helper functions that best fit the task family."
+            )
         if strategy == "json_payload":
             return (
-                "Стратегия: верни только JSON-объект. "
-                "Каждое исполняемое Lua-значение должно быть обёрнуто в строку lua{...}lua. "
-                "Не добавляй лишние поля и не используй шаблонный каркас."
+                "Strategy: return a JSON object only. "
+                "Wrap executable Lua values as lua{...}lua strings. Do not add extra fields."
             )
         if strategy == "strict":
             return (
-                "Стратегия: выбери самое короткое корректное решение LocalScript. "
-                "Не придумывай переменные и поля, которых нет в контексте задачи. "
-                "Сначала проверь семантику выполнения, потом сокращай код."
+                "Strategy: choose the shortest semantically correct LocalScript. "
+                "Do not invent variables or workflow keys that are absent from the prompt."
             )
         if strategy == "repair_ready":
             return (
-                "Стратегия: подготовь ответ, который легко проходит quality gate. "
-                "Избегай placeholder-ов, markdown, комментариев и примерных литералов из prompt-а. "
-                "Если внутренний self-check находит дефект, перепиши ответ до возврата."
+                "Strategy: prepare an answer that passes quality-gate checks. "
+                "Avoid markdown, placeholders, debug prints, and sample literals from prompt examples."
             )
         return (
-            "Стратегия: сгенерируй самый прямой и практичный ответ LocalScript для этой задачи. "
-            "Строй решение с нуля по данным задачи, а не по заготовке."
+            "Strategy: build the solution from the current task and context only. "
+            "Do not rely on canned templates or placeholder scaffolding."
         )
 
     def _self_check_block(self) -> str:
         return (
-            "Внутренний self-check перед ответом:\n"
-            "1. Мысленно проверь синтаксис и luac-level выполнимость.\n"
-            "2. Проверь доступы к wf.vars / wf.initVariables и отсутствие выдуманных переменных.\n"
-            "3. Проверь семантику: входные данные, изменения состояния и точный итоговый output.\n"
-            "4. Проверь крайние случаи: nil, пустой массив, отсутствующее поле, пустая строка.\n"
-            "5. Если найден дефект, пересобери код и верни только исправленную финальную версию."
+            "Internal self-check before final answer:\n"
+            "1. Verify syntax and luac-level executability.\n"
+            "2. Verify workflow paths, undefined names, and side effects.\n"
+            "3. Verify edge cases such as nil, empty arrays, and missing fields.\n"
+            "4. If a defect is found, rebuild the code and return only the corrected final version."
         )
 
     def _select_best_candidate(self, candidates: Sequence[_Candidate]) -> _Candidate:
@@ -571,7 +569,7 @@ class LocalScriptService:
         if is_refine_without_code:
             return "Пришлите текущий LocalScript-код или JSON-контекст, который нужно исправить или доработать."
         if is_short and lacks_domain_signal:
-            return "Уточните задачу и пришлите пример входного контекста, чтобы я сгенерировал корректный LocalScript."
+            return "Уточните задачу и пришлите пример входного контекста, чтобы сгенерировать корректный LocalScript."
         if asks_json and lacks_domain_signal:
             return "Уточните, какие поля должны попасть в JSON, и пришлите workflow-контекст для LocalScript."
         return None
@@ -589,6 +587,79 @@ class LocalScriptService:
             assumptions.append("Если схема JSON не указана, нужно вернуть только минимальные явно запрошенные поля.")
         return assumptions[:MAX_ASSUMPTIONS]
 
+    def _task_family(self, task: str) -> str:
+        lowered = task.lower()
+        if any(marker in lowered for marker in JSON_RESULT_PHRASES):
+            return "json_payload"
+        if any(marker in lowered for marker in REST_CLEANUP_MARKERS):
+            return "rest_cleanup"
+        if any(marker in lowered for marker in ARRAY_FILTER_MARKERS):
+            return "array_filter"
+        if "markasarray" in lowered or ("помет" in lowered and "массив" in lowered):
+            return "array_helpers"
+        if any(marker in lowered for marker in UNIX_TIME_MARKERS):
+            return "datetime_unix"
+        if any(marker in lowered for marker in ISO_TIME_MARKERS):
+            return "datetime_iso"
+        if any(marker in lowered for marker in LAST_MARKERS):
+            return "selection_last"
+        if any(marker in lowered for marker in INCREMENT_MARKERS):
+            return "increment"
+        if ("return" in lowered or "верни" in lowered) and ("wf.vars" in lowered or "wf.initvariables" in lowered or "{" in lowered):
+            return "direct_return"
+        return "generic"
+
+    def _task_contract(self, task: str) -> str:
+        family = self._task_family(task)
+        common = (
+            "Output contract:\n"
+            "- Return executable LocalScript only.\n"
+            "- Never use print() or debug output in judged mode.\n"
+            "- Prefer return over side-effect-only code.\n"
+            "- Do not invent workflow keys that are absent from the prompt context."
+        )
+        family_contracts = {
+            "selection_last": (
+                "- For last-element tasks, return the last item directly from the workflow array.\n"
+                "- Prefer a direct return expression over temporary variables."
+            ),
+            "increment": (
+                "- For increment tasks, compute the incremented value and return it.\n"
+                "- Do not stop at assignment-only code."
+            ),
+            "rest_cleanup": (
+                "- For REST cleanup tasks, work from wf.vars.RESTbody.result.\n"
+                "- Remove keys other than ID, ENTITY_ID, and CALL, then return the filtered result."
+            ),
+            "array_filter": (
+                "- For Discount/Markdown filtering, use wf.vars.parsedCsv when the source array is not named explicitly.\n"
+                "- Build the result with _utils.array.new(), add matched rows with table.insert, and return the new array."
+            ),
+            "array_helpers": (
+                "- Use _utils.array.markAsArray for existing tables that must be marked as arrays.\n"
+                "- Use _utils.array.new() only when creating a new array."
+            ),
+            "datetime_unix": (
+                "- Read recallTime from wf.initVariables when present.\n"
+                "- Convert to unix timestamp with os.time and return the timestamp.\n"
+                "- Prefer a compact parser with short local variables to stay within the judged token budget."
+            ),
+            "datetime_iso": (
+                "- Build an ISO 8601 string from DATUM and TIME fields.\n"
+                "- Return the final formatted string."
+            ),
+            "json_payload": (
+                "- Return a JSON object only.\n"
+                "- Wrap executable Lua values inside lua{...}lua strings."
+            ),
+            "direct_return": (
+                "- Return the requested workflow path directly.\n"
+                "- Do not print the value and do not wrap it in extra variables unless necessary."
+            ),
+        }
+        specific = family_contracts.get(family)
+        return common if specific is None else f"{common}\n{specific}"
+
     def _looks_like_code(self, text: str) -> bool:
         lowered = text.lower()
         return "wf." in lowered or "return " in lowered or "lua{" in lowered or "function " in lowered
@@ -596,25 +667,25 @@ class LocalScriptService:
     def _context_summary(self, task: str) -> str:
         context = self._extract_json_context(task)
         if not context:
-            return "Структурированный JSON workflow-контекст не найден."
+            return "Structured JSON workflow context not found."
 
         wf_payload = context.get("wf")
         if not isinstance(wf_payload, dict):
-            return "JSON-контекст найден, но payload wf отсутствует."
+            return "JSON context found, but wf payload is missing."
 
         parts: list[str] = []
         vars_payload = wf_payload.get("vars")
         if isinstance(vars_payload, dict) and vars_payload:
             vars_keys = ", ".join(sorted(vars_payload.keys())[:12])
-            parts.append(f"Ключи wf.vars: {vars_keys}")
+            parts.append(f"wf.vars keys: {vars_keys}")
 
         init_payload = wf_payload.get("initVariables")
         if isinstance(init_payload, dict) and init_payload:
             init_keys = ", ".join(sorted(init_payload.keys())[:12])
-            parts.append(f"Ключи wf.initVariables: {init_keys}")
+            parts.append(f"wf.initVariables keys: {init_keys}")
 
         if not parts:
-            return "JSON-контекст найден, но wf.vars и wf.initVariables пусты."
+            return "JSON context found, but wf.vars and wf.initVariables are empty."
         return "\n".join(parts)
 
     def _extract_json_context(self, task: str) -> dict[str, Any] | None:
@@ -632,7 +703,6 @@ class LocalScriptService:
         lowered = task.lower()
         if any(marker in lowered for marker in LUA_MODE_MARKERS):
             return None
-
         for language, patterns in NON_LUA_LANGUAGE_PATTERNS.items():
             if any(re.search(pattern, lowered) for pattern in patterns):
                 return language
@@ -659,17 +729,20 @@ class LocalScriptService:
         hints = Counter[str]()
         for message in negative_messages:
             stripped = message.strip()
+            lowered = stripped.lower()
             if stripped in {"{}", "[]"}:
-                hints["Не возвращай пустой контейнер вместо исполняемого LocalScript-кода."] += 1
-            if "```" in message:
-                hints["Не используй markdown fences в итоговом ответе."] += 1
-            if "$." in message or "$[" in message:
-                hints["Не используй JsonPath, только wf.vars и wf.initVariables."] += 1
+                hints["Do not return an empty container instead of executable LocalScript code."] += 1
+            if "```" in stripped:
+                hints["Do not include markdown fences in the final answer."] += 1
+            if "$." in stripped or "$[" in stripped:
+                hints["Do not use JsonPath. Use wf.vars / wf.initVariables only."] += 1
             if stripped.startswith("{") and "lua{" not in stripped:
-                hints["Для JSON payload оборачивай исполняемые Lua-значения в lua{...}lua."] += 1
-            if "wf." not in message and any(token in message for token in ("return", "local", "function")):
-                hints["Если в задаче есть workflow-контекст, используй wf.vars или wf.initVariables."] += 1
-        return [hint for hint, _ in hints.most_common(3)]
+                hints["For JSON payloads, wrap executable Lua values as lua{...}lua strings."] += 1
+            if "print(" in lowered:
+                hints["Do not use print() for final judged output. Return the value instead."] += 1
+            if "wf." not in stripped and any(token in lowered for token in ("return", "local", "function")):
+                hints["If workflow context exists, use wf.vars or wf.initVariables explicitly."] += 1
+        return [hint for hint, _ in hints.most_common(4)]
 
     def _build_mode_guard_message(self, language: str) -> str:
         return (

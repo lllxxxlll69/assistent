@@ -82,6 +82,7 @@ class LLMClient:
         stream: bool | None = None,
         max_tokens_override: int | None = None,
         context_size_override: int | None = None,
+        temperature_override: float | None = None,
     ) -> str:
         payload = self._build_payload(
             messages=messages,
@@ -89,6 +90,7 @@ class LLMClient:
             stream=stream if stream is not None else False,
             max_tokens_override=max_tokens_override,
             context_size_override=context_size_override,
+            temperature_override=temperature_override,
         )
         try:
             response = self._session.post(
@@ -122,6 +124,7 @@ class LLMClient:
         model: str | None = None,
         max_tokens_override: int | None = None,
         context_size_override: int | None = None,
+        temperature_override: float | None = None,
     ) -> Iterable[str]:
         payload = self._build_payload(
             messages=messages,
@@ -129,6 +132,7 @@ class LLMClient:
             stream=True,
             max_tokens_override=max_tokens_override,
             context_size_override=context_size_override,
+            temperature_override=temperature_override,
         )
         try:
             response = self._session.post(
@@ -183,12 +187,14 @@ class LLMClient:
         model: str | None = None,
         max_tokens_override: int | None = None,
         context_size_override: int | None = None,
+        temperature_override: float | None = None,
     ) -> AsyncIterator[str]:
         for chunk in self.chat_stream(
             messages,
             model=model,
             max_tokens_override=max_tokens_override,
             context_size_override=context_size_override,
+            temperature_override=temperature_override,
         ):
             yield chunk
 
@@ -200,6 +206,7 @@ class LLMClient:
         model: str | None = None,
         max_tokens_override: int | None = None,
         context_size_override: int | None = None,
+        temperature_override: float | None = None,
     ) -> str:
         payload = self._build_payload(
             messages=[{"role": "user", "content": prompt, "images": [image_base64]}],
@@ -207,6 +214,7 @@ class LLMClient:
             stream=False,
             max_tokens_override=max_tokens_override,
             context_size_override=context_size_override,
+            temperature_override=temperature_override,
         )
         try:
             response = self._session.post(
@@ -260,13 +268,14 @@ class LLMClient:
         stream: bool,
         max_tokens_override: int | None = None,
         context_size_override: int | None = None,
+        temperature_override: float | None = None,
     ) -> dict[str, object]:
         return {
             "model": model,
             "messages": messages,
             "stream": stream,
             "options": {
-                "temperature": self.settings.temperature,
+                "temperature": self.settings.temperature if temperature_override is None else temperature_override,
                 "num_predict": max_tokens_override or self.settings.max_tokens,
                 "num_ctx": context_size_override or self.settings.context_size,
                 "num_batch": self.settings.batch_size,

@@ -20,6 +20,7 @@ class Settings:
     vision_model: str = "qwen3-vl:4b"
     api_url: str = os.getenv("ASSISTANT_API_URL", "http://127.0.0.1:11434/api/chat")
     temperature: float = 0.2
+    localscript_temperature: float = 0.0
     max_tokens: int = 1200
     context_size: int = 8192
     memory_length: int = 20
@@ -111,6 +112,7 @@ class SettingsManager:
             "ASSISTANT_VISION_MODEL": ("vision_model", str),
             "ASSISTANT_API_URL": ("api_url", str),
             "ASSISTANT_TEMPERATURE": ("temperature", float),
+            "ASSISTANT_LOCALSCRIPT_TEMPERATURE": ("localscript_temperature", float),
             "ASSISTANT_MAX_TOKENS": ("max_tokens", int),
             "ASSISTANT_CONTEXT_SIZE": ("context_size", int),
             "ASSISTANT_MEMORY_LENGTH": ("memory_length", int),

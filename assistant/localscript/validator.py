@@ -24,6 +24,10 @@ JSON_EMBEDDED_CODE_RE = re.compile(r"\b(return|local|function|wf\.)\b")
 LAST_MARKERS = ("последн", "last")
 INCREMENT_MARKERS = ("увелич", "increment", "счетчик", "counter")
 ARRAY_MARKERS = ("отфильтр", "filter", "array", "массив")
+REST_CLEANUP_MARKERS = ("rest", "restbody", "entity_id")
+ARRAY_FILTER_MARKERS = ("discount", "markdown", "parsedcsv")
+UNIX_TIME_MARKERS = ("recalltime", "unix", "timestamp")
+PRINT_ALLOWED_MARKERS = ("print", "log", "вывед", "печать")
 JSON_RESULT_PHRASES = (
     "json payload",
     "json-payload",
@@ -92,7 +96,10 @@ class LocalScriptValidator:
         pass_check("normalized_output", f"chars={len(normalized_code)}")
 
         if "```" in candidate:
-            fail_check("no_markdown", "Markdown code fences must not be returned.")
+            if CODE_FENCE_RE.fullmatch(candidate.strip()):
+                pass_check("no_markdown", "Markdown fences were stripped during normalization.")
+            else:
+                fail_check("no_markdown", "Markdown code fences must not be returned.")
         else:
             pass_check("no_markdown")
 
@@ -165,6 +172,42 @@ class LocalScriptValidator:
             fail_check("increment_semantics", "An increment task should increase the variable by one.")
         elif any(marker in lower_task for marker in INCREMENT_MARKERS):
             pass_check("increment_semantics")
+
+        if self._requires_return(lower_task, expects_json_result) and "return " not in normalized_code:
+            fail_check("must_return", "The judged result must return the computed value.")
+        elif self._requires_return(lower_task, expects_json_result):
+            pass_check("must_return")
+
+        if "print(" in normalized_code and not any(marker in lower_task for marker in PRINT_ALLOWED_MARKERS):
+            fail_check("no_print_debug", "Use return, not print(), in judged LocalScript output.")
+        else:
+            pass_check("no_print_debug")
+
+        if any(marker in lower_task for marker in REST_CLEANUP_MARKERS):
+            if "wf.vars.RESTbody.result" not in normalized_code:
+                fail_check("rest_result_source", "REST cleanup must start from wf.vars.RESTbody.result.")
+            else:
+                pass_check("rest_result_source")
+            if "filtered_entry[key] = nil" not in normalized_code and 'key ~=' not in normalized_code:
+                fail_check("rest_cleanup_pattern", "REST cleanup must remove keys other than ID, ENTITY_ID, and CALL.")
+            else:
+                pass_check("rest_cleanup_pattern")
+
+        if "discount" in lower_task or "markdown" in lower_task:
+            if "wf.vars.parsedCsv" not in normalized_code:
+                fail_check("parsed_csv_source", "Discount/Markdown filtering should use wf.vars.parsedCsv.")
+            else:
+                pass_check("parsed_csv_source")
+            if "table.insert" not in normalized_code:
+                fail_check("array_insert_pattern", "Filtered rows should be appended with table.insert.")
+            else:
+                pass_check("array_insert_pattern")
+
+        if any(marker in lower_task for marker in UNIX_TIME_MARKERS):
+            if "os.time" not in normalized_code:
+                fail_check("unix_time", "Unix-time conversion must use os.time.")
+            else:
+                pass_check("unix_time")
 
         if expects_json_result:
             json_payload = self._parse_json_payload(normalized_code)
@@ -493,6 +536,23 @@ class LocalScriptValidator:
             if scope == "initVariables" and init_vars and name not in init_vars:
                 missing.append(f"wf.initVariables.{name}")
         return sorted(set(missing))
+
+    def _requires_return(self, lower_task: str, expects_json_result: bool) -> bool:
+        if expects_json_result:
+            return False
+        if any(marker in lower_task for marker in LAST_MARKERS):
+            return True
+        if any(marker in lower_task for marker in INCREMENT_MARKERS):
+            return True
+        if any(marker in lower_task for marker in REST_CLEANUP_MARKERS):
+            return True
+        if any(marker in lower_task for marker in ARRAY_FILTER_MARKERS):
+            return True
+        if any(marker in lower_task for marker in UNIX_TIME_MARKERS):
+            return True
+        if "return" in lower_task or "верни" in lower_task:
+            return True
+        return False
 
     def _needs_array_constructor(self, lower_task: str, normalized_code: str) -> bool:
         if not any(marker in lower_task for marker in ARRAY_MARKERS):

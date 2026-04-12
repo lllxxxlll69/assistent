@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.assistant_data
+artifacts
+__MACOSX
