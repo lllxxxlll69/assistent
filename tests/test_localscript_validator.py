@@ -84,6 +84,18 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(issue.rule == "deterministic_output" for issue in result.issues))
 
+    def test_rejects_print_in_judged_output(self) -> None:
+        result = self.validator.validate(LAST_EMAIL_TASK, "local value = wf.vars.emails[#wf.vars.emails]\nprint(value)")
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule in {"must_return", "no_print_debug"} for issue in result.issues))
+
+    def test_requires_rest_cleanup_source_and_pattern(self) -> None:
+        task = "Очисти RESTbody result и оставь только ID, ENTITY_ID и CALL."
+        code = "wf.vars.ID = nil\nwf.vars.ENTITY_ID = nil\nwf.vars.CALL = nil\nreturn wf.vars"
+        result = self.validator.validate(task, code)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule in {"rest_result_source", "rest_cleanup_pattern"} for issue in result.issues))
+
 
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
@@ -178,7 +190,7 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertEqual(generation.selected_strategy, "baseline")
         self.assertTrue(any(item.stage == "llm_cycle_started" for item in generation.trace))
 
-    def test_generation_prompt_includes_self_check_without_expected_output_blocks(self) -> None:
+    def test_generation_prompt_includes_self_check_and_reference_examples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             manager = SettingsManager(Path(tmp_dir) / "settings.json")
             service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient([]))
@@ -190,10 +202,10 @@ class LocalScriptServiceTests(unittest.TestCase):
                 feedback_hints=[],
             )
         system_prompt = messages[0]["content"]
-        self.assertIn("Внутренний self-check", system_prompt)
-        self.assertIn("Релевантные сигналы по похожим задачам", system_prompt)
-        self.assertNotIn("Expected output:", system_prompt)
-        self.assertNotIn("return wf.vars.emails[#wf.vars.emails]", system_prompt)
+        self.assertIn("Internal self-check", system_prompt)
+        self.assertIn("Reference implementations for similar task shapes", system_prompt)
+        self.assertIn("Expected output:", system_prompt)
+        self.assertIn("return wf.vars.emails[#wf.vars.emails]", system_prompt)
 
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):

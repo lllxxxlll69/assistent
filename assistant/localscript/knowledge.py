@@ -154,27 +154,8 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
         title="ISO to unix time",
         prompt="Конвертируй время в переменной recallTime в unix-формат.",
         expected_code=(
-            "local iso_time = wf.initVariables.recallTime\n"
-            "if not iso_time or not iso_time:match(\"^%d%d%d%d%-%d%d%-%d%dT\") then\n"
-            "    return nil\n"
-            "end\n"
-            "local year = tonumber(iso_time:sub(1, 4))\n"
-            "local month = tonumber(iso_time:sub(6, 7))\n"
-            "local day = tonumber(iso_time:sub(9, 10))\n"
-            "local hour = tonumber(iso_time:sub(12, 13))\n"
-            "local minute = tonumber(iso_time:sub(15, 16))\n"
-            "local second = tonumber(iso_time:sub(18, 19))\n"
-            "local timestamp = os.time({year = year, month = month, day = day, hour = hour, min = minute, sec = second})\n"
-            "local sign, tz_hour, tz_minute = iso_time:match(\"([%+%-])(%d%d):(%d%d)$\")\n"
-            "if sign and tz_hour and tz_minute then\n"
-            "    local shift = tonumber(tz_hour) * 3600 + tonumber(tz_minute) * 60\n"
-            "    if sign == \"+\" then\n"
-            "        timestamp = timestamp - shift\n"
-            "    else\n"
-            "        timestamp = timestamp + shift\n"
-            "    end\n"
-            "end\n"
-            "return timestamp"
+            "local y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)\")\n"
+            "return os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})"
         ),
         keywords=("recalltime", "unix", "epoch", "initvariables", "time"),
     ),
