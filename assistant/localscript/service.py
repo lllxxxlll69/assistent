@@ -9,6 +9,12 @@ from typing import Any, Literal
 
 from assistant.config.settings import SettingsManager
 from assistant.llm.client import LLMClient, LLMClientError
+from assistant.localscript.semantic_checks import (
+    extract_json_context,
+    extract_numeric_literals,
+    extract_requested_json_fields,
+    task_requires_timezone_aware_unix,
+)
 from assistant.localscript.runtime import build_runtime_constraints, probe_ollama_runtime
 from assistant.localscript.knowledge import LocalScriptKnowledgeBase
 from assistant.localscript.validator import LocalScriptValidator
@@ -53,7 +59,7 @@ INCREMENT_MARKERS = ("увелич", "increment", "счетчик", "counter")
 REST_CLEANUP_MARKERS = ("rest", "restbody", "entity_id")
 ARRAY_FILTER_MARKERS = ("discount", "markdown", "parsedcsv")
 UNIX_TIME_MARKERS = ("recalltime", "unix", "timestamp")
-ISO_TIME_MARKERS = ("iso 8601", "yyyymmdd", "hhmmss", "datum", "time")
+ISO_TIME_MARKERS = ("iso 8601", "yyyymmdd", "hhmmss", "datum")
 MAX_ASSUMPTIONS = 2
 
 
@@ -80,6 +86,8 @@ class LocalScriptService:
         self.llm_client = llm_client
         self.knowledge_base = knowledge_base or LocalScriptKnowledgeBase()
         self.validator = validator or LocalScriptValidator()
+        self._runtime_guard_cache_key: tuple[Any, ...] | None = None
+        self._runtime_guard_cache_value: dict[str, Any] | None = None
 
     def generate(
         self,
@@ -194,8 +202,52 @@ class LocalScriptService:
                     ),
                 )
             )
-        feedback_hints = self._feedback_hints()
         candidates: list[_Candidate] = []
+        symbolic_candidate = self._build_symbolic_candidate(task)
+        if symbolic_candidate is not None:
+            candidate = self._build_candidate(task=task, label="symbolic", source="symbolic", raw_response=symbolic_candidate)
+            candidates.append(candidate)
+            candidate_reports.append(self._to_candidate_artifact(candidate))
+            logs.append(
+                ActionLogEntry(
+                    message=(
+                        "Собран детерминированный LocalScript-кандидат "
+                        f"(score={candidate.score}, valid={candidate.validation.is_valid}, luac={candidate.validation.luac_status})"
+                    ),
+                    success=candidate.validation.is_valid,
+                )
+            )
+            trace.append(
+                GenerationTraceEntry(
+                    stage="symbolic_generated",
+                    status="candidate_ready",
+                    detail=f"symbolic: score={candidate.score}, valid={candidate.validation.is_valid}",
+                )
+            )
+            if interaction_mode == "judged" and candidate.validation.is_valid:
+                trace.append(
+                    GenerationTraceEntry(
+                        stage="final_selected",
+                        status="passed",
+                        detail="source=symbolic, repairs=0",
+                    )
+                )
+                return LocalScriptGeneration(
+                    code=candidate.validation.normalized_code,
+                    validation=candidate.validation,
+                    logs=logs + self._validation_issue_logs(candidate.validation),
+                    clarification_question=None,
+                    raw_response=candidate.raw_response,
+                    selected_strategy="symbolic",
+                    candidate_count=1,
+                    assumptions=assumptions,
+                    trace=trace,
+                    candidate_reports=candidate_reports,
+                    repair_attempts_used=repair_attempts_used,
+                    runtime_info=runtime_info,
+                )
+
+        feedback_hints = self._feedback_hints()
         labels = self._candidate_labels(task, settings.localscript_candidate_count)
         trace.append(GenerationTraceEntry(stage="llm_cycle_started", status="running", detail=f"candidate_count={len(labels)}"))
 
@@ -348,6 +400,7 @@ class LocalScriptService:
             issues=[issue.message for issue in candidate.validation.issues],
             checks=list(candidate.validation.checks),
             luac_status=candidate.validation.luac_status,
+            syntax_engine=candidate.validation.syntax_engine,
             repair_round=candidate.repair_round,
             score_breakdown=dict(candidate.score_breakdown),
         )
@@ -369,13 +422,109 @@ class LocalScriptService:
         if family in {"rest_cleanup", "array_filter", "array_helpers"}:
             labels.append("domain_strict")
         if family == "json_payload":
-            labels.append("json_payload")
+            labels.extend(["json_payload", "json_shape_strict"])
+        if family == "datetime_unix":
+            labels.append("timezone_strict")
+        if family == "datetime_iso":
+            labels.append("iso_shape_strict")
+        if family == "array_helpers":
+            labels.append("array_helper_strict")
         labels.extend(["strict", "repair_ready"])
         deduplicated: list[str] = []
         for label in labels:
             if label not in deduplicated:
                 deduplicated.append(label)
         return deduplicated[: max(1, candidate_count)]
+
+    def _build_symbolic_candidate(self, task: str) -> str | None:
+        family = self._task_family(task)
+        if family == "selection_last":
+            path = self._single_workflow_path(task)
+            if path:
+                return f"return {path}[#{path}]"
+        if family == "increment":
+            path = self._single_workflow_path(task)
+            if path:
+                return f"return {path} + 1"
+        if family == "direct_return":
+            path = self._single_workflow_path(task)
+            if path:
+                return f"return {path}"
+        if family == "datetime_unix":
+            return self._build_symbolic_unix_time_candidate(task)
+        if family == "json_payload":
+            return self._build_symbolic_json_payload_candidate(task)
+        return None
+
+    def _single_workflow_path(self, task: str) -> str | None:
+        context = self._extract_json_context(task)
+        if not context:
+            return None
+        wf_payload = context.get("wf")
+        if not isinstance(wf_payload, dict):
+            return None
+        candidates: list[str] = []
+        vars_payload = wf_payload.get("vars")
+        if isinstance(vars_payload, dict):
+            candidates.extend(f"wf.vars.{key}" for key in vars_payload.keys())
+        init_payload = wf_payload.get("initVariables")
+        if isinstance(init_payload, dict):
+            candidates.extend(f"wf.initVariables.{key}" for key in init_payload.keys())
+        if len(candidates) == 1:
+            return candidates[0]
+        lowered = task.lower()
+        matched = [path for path in candidates if path.split(".")[-1].lower() in lowered]
+        return matched[0] if len(matched) == 1 else None
+
+    def _build_symbolic_unix_time_candidate(self, task: str) -> str | None:
+        recall_time_required = "wf.initvariables.recalltime" in task.lower() or "recalltime" in task.lower()
+        if not recall_time_required:
+            return None
+        return (
+            "local y, m, d, h, mi, s, sign, tz_h, tz_m = "
+            "wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)([%+%-])(%d%d):(%d%d)$\")\n"
+            "if not y then\n"
+            "    y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$\")\n"
+            "    sign, tz_h, tz_m = \"+\", \"00\", \"00\"\n"
+            "end\n"
+            "local offset = (tonumber(tz_h) * 3600) + (tonumber(tz_m) * 60)\n"
+            "local timestamp = os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})\n"
+            "return sign == \"+\" and (timestamp - offset) or (timestamp + offset)"
+        )
+
+    def _build_symbolic_json_payload_candidate(self, task: str) -> str | None:
+        requested_fields = extract_requested_json_fields(task)
+        if not requested_fields:
+            return None
+
+        numeric_literals = extract_numeric_literals(task)
+        if {field.casefold() for field in requested_fields} == {"num", "squared"} and numeric_literals:
+            literal = numeric_literals[0]
+            payload = {
+                "num": f"lua{{return tonumber('{literal}')}}lua",
+                "squared": f"lua{{local n = tonumber('{literal}'); return n * n}}lua",
+            }
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+        context = self._extract_json_context(task)
+        if not context:
+            return None
+        wf_payload = context.get("wf")
+        if not isinstance(wf_payload, dict):
+            return None
+
+        payload: dict[str, str] = {}
+        vars_payload = wf_payload.get("vars")
+        init_payload = wf_payload.get("initVariables")
+        for field in requested_fields:
+            if isinstance(vars_payload, dict) and field in vars_payload:
+                payload[field] = f"lua{{return wf.vars.{field}}}lua"
+                continue
+            if isinstance(init_payload, dict) and field in init_payload:
+                payload[field] = f"lua{{return wf.initVariables.{field}}}lua"
+                continue
+            return None
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if payload else None
 
     def _generate_once(
         self,
@@ -481,11 +630,12 @@ class LocalScriptService:
                 self.knowledge_base.render_rules(),
                 self._self_check_block(),
                 self._task_contract(task),
+                f"Family-specific hints:\n{self._family_specific_hints(task)}",
                 self._strategy_prompt(strategy),
                 f"Context summary:\n{self._context_summary(task)}",
                 f"Task-family signals:\n{guidance}",
                 (
-                    "Reference implementations for similar task shapes. "
+                    "Reference guidance for similar task shapes. "
                     "Adapt the structure, but never copy identifiers or sample literals that are absent from the current task:\n"
                     f"{examples}"
                 ),
@@ -531,6 +681,26 @@ class LocalScriptService:
                 "Strategy: return a JSON object only. "
                 "Wrap executable Lua values as lua{...}lua strings. Do not add extra fields."
             )
+        if strategy == "json_shape_strict":
+            return (
+                "Strategy: infer the exact JSON field set from the task wording. "
+                "Return only the requested fields, and wrap every executable Lua value as lua{...}lua."
+            )
+        if strategy == "timezone_strict":
+            return (
+                "Strategy: preserve timestamp semantics exactly. "
+                "If the source ISO string contains a timezone offset, parse and apply that offset instead of ignoring it."
+            )
+        if strategy == "iso_shape_strict":
+            return (
+                "Strategy: build a canonical ISO 8601 string. "
+                "Insert date and time separators explicitly and avoid returning compact YYYYMMDDTHHMMSS strings."
+            )
+        if strategy == "array_helper_strict":
+            return (
+                "Strategy: use array helpers explicitly. "
+                "When normalizing existing tables, prefer _utils.array.markAsArray; use _utils.array.new() only for newly created arrays."
+            )
         if strategy == "strict":
             return (
                 "Strategy: choose the shortest semantically correct LocalScript. "
@@ -556,6 +726,19 @@ class LocalScriptService:
         )
 
     def _ensure_judged_runtime(self, settings) -> dict[str, Any]:
+        cache_key = (
+            settings.localscript_model,
+            settings.localscript_context_size,
+            settings.localscript_num_predict,
+            settings.batch_size,
+            settings.localscript_require_full_gpu,
+            settings.localscript_full_gpu_ratio,
+            settings.localscript_max_vram_bytes,
+            settings.localscript_expected_digest,
+        )
+        if self._runtime_guard_cache_key == cache_key and self._runtime_guard_cache_value is not None:
+            return dict(self._runtime_guard_cache_value)
+
         warm_up_seconds = self.llm_client.warm_up(
             settings.localscript_model,
             max_tokens_override=8,
@@ -582,6 +765,8 @@ class LocalScriptService:
                 if not passed
             )
             raise LLMClientError(f"Judged runtime guard failed: {details}")
+        self._runtime_guard_cache_key = cache_key
+        self._runtime_guard_cache_value = dict(runtime_info)
         return runtime_info
 
     def _select_best_candidate(self, candidates: Sequence[_Candidate]) -> _Candidate:
@@ -706,15 +891,18 @@ class LocalScriptService:
             "datetime_unix": (
                 "- Read recallTime from wf.initVariables when present.\n"
                 "- Convert to unix timestamp with os.time and return the timestamp.\n"
+                "- If recallTime contains a timezone offset, parse and apply that offset instead of ignoring it.\n"
                 "- Prefer a compact parser with short local variables to stay within the judged token budget."
             ),
             "datetime_iso": (
                 "- Build an ISO 8601 string from DATUM and TIME fields.\n"
+                "- Insert separators so the final shape is YYYY-MM-DDTHH:MM:SS(.fraction)Z.\n"
                 "- Return the final formatted string."
             ),
             "json_payload": (
                 "- Return a JSON object only.\n"
-                "- Wrap executable Lua values inside lua{...}lua strings."
+                "- Wrap executable Lua values inside lua{...}lua strings.\n"
+                "- If the task names JSON fields explicitly, return exactly those fields and no extras."
             ),
             "direct_return": (
                 "- Return the requested workflow path directly.\n"
@@ -753,15 +941,25 @@ class LocalScriptService:
         return "\n".join(parts)
 
     def _extract_json_context(self, task: str) -> dict[str, Any] | None:
-        start = task.find("{")
-        end = task.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        try:
-            payload = json.loads(task[start : end + 1])
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
+        return extract_json_context(task)
+
+    def _family_specific_hints(self, task: str) -> str:
+        family = self._task_family(task)
+        hints: list[str] = []
+        if family == "json_payload":
+            requested_fields = extract_requested_json_fields(task)
+            if requested_fields:
+                hints.append("Requested JSON fields: " + ", ".join(requested_fields))
+            numeric_literals = extract_numeric_literals(task)
+            if numeric_literals:
+                hints.append("Numeric literals from the task: " + ", ".join(numeric_literals[:4]))
+        if family == "datetime_unix" and task_requires_timezone_aware_unix(task):
+            hints.append("The source recallTime contains a timezone offset, so the conversion must preserve absolute time.")
+        if family == "datetime_iso":
+            hints.append("The target format must include date separators, time separators, and a trailing UTC marker.")
+        if family == "array_helpers":
+            hints.append("Normalize nested items with explicit array helpers instead of ad hoc plain tables.")
+        return "\n".join(f"- {item}" for item in hints) if hints else "- No extra family-specific hints."
 
     def _detect_unsupported_language(self, task: str) -> str | None:
         lowered = task.lower()

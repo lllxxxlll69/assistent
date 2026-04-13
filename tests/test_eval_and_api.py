@@ -34,6 +34,7 @@ class _StubOrchestrator:
                 "candidate_count": 1,
                 "selected_strategy": "baseline",
                 "luac_status": "skipped_with_reason",
+                "syntax_engine": "luaparser",
             },
         )
 
@@ -92,6 +93,7 @@ class EvalAndAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(statuses["full_eval"], "skipped_with_reason")
         self.assertIn("pinned_python_dependencies", statuses)
         self.assertEqual(statuses["runtime_guard_enabled"], "passed")
+        self.assertEqual(statuses["syntax_gate_available"], "passed")
         self.assertEqual(report["knowledge_eval_overlap"]["exact_overlap_count"], 0)
 
     async def test_http_api_generate_endpoint_returns_code_contract(self) -> None:
@@ -118,6 +120,8 @@ class EvalAndAPITests(unittest.IsolatedAsyncioTestCase):
                 LocalScriptAPIHandler.backend = None
 
         self.assertEqual(body["code"], "return wf.vars.orderId")
+        self.assertIsNone(body["clarification_question"])
+        self.assertIn("metrics", body)
 
 
 class OptionalLiveOllamaTests(unittest.TestCase):

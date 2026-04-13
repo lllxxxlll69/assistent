@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from assistant.localscript.semantic_checks import (
+    code_handles_timezone_offset,
+    extract_json_context,
+    looks_like_iso8601_builder,
+    task_requires_timezone_aware_unix,
+    verify_json_payload_shape,
+)
+from assistant.localscript.syntax_gate import run_syntax_gate
 from assistant.models import ValidationCheckResult, ValidationIssue, ValidationResult
 
 
@@ -57,6 +61,7 @@ NON_DETERMINISTIC_RE = re.compile(r"\bmath\.random(?:seed)?\b|\bRandom\.new\b")
 class LuacCheckOutcome:
     status: str
     detail: str
+    engine: str = ""
     issue: ValidationIssue | None = None
 
 
@@ -69,6 +74,7 @@ class LocalScriptValidator:
         check_results: list[ValidationCheckResult] = []
         luac_status = "skipped_with_reason"
         luac_detail = "luac not executed."
+        syntax_engine = ""
 
         def pass_check(name: str, detail: str = "") -> None:
             checks.append(name)
@@ -91,6 +97,7 @@ class LocalScriptValidator:
                 check_results=check_results,
                 luac_status="skipped_with_reason",
                 luac_detail="Empty normalized output.",
+                syntax_engine=syntax_engine,
             )
 
         pass_check("normalized_output", f"chars={len(normalized_code)}")
@@ -109,7 +116,7 @@ class LocalScriptValidator:
             pass_check("no_jsonpath")
 
         lower_task = task.lower()
-        task_context = self._extract_json_context(task)
+        task_context = extract_json_context(task)
         task_wf_vars = self._wf_vars(task_context)
         task_init_vars = self._wf_init_variables(task_context)
         expects_workflow = bool(task_wf_vars or task_init_vars) or "wf." in lower_task
@@ -208,13 +215,31 @@ class LocalScriptValidator:
                 fail_check("unix_time", "Unix-time conversion must use os.time.")
             else:
                 pass_check("unix_time")
+            if task_requires_timezone_aware_unix(task):
+                if not code_handles_timezone_offset(normalized_code):
+                    fail_check(
+                        "timezone_offset",
+                        "Timezone offset from recallTime must be parsed and applied instead of ignored.",
+                    )
+                else:
+                    pass_check("timezone_offset")
+
+        if any(marker in lower_task for marker in ("iso 8601", "yyyymmdd", "hhmmss", "datum")):
+            if not looks_like_iso8601_builder(normalized_code):
+                fail_check(
+                    "iso_8601_shape",
+                    "ISO 8601 conversion must build YYYY-MM-DDTHH:MM:SS(.fraction)Z from DATUM/TIME.",
+                )
+            else:
+                pass_check("iso_8601_shape")
 
         if expects_json_result:
-            json_payload = self._parse_json_payload(normalized_code)
-            if json_payload is None:
+            payload_check = verify_json_payload_shape(task, normalized_code)
+            json_payload = payload_check.payload
+            if json_payload is None or not payload_check.ok:
                 fail_check(
                     "json_payload_shape",
-                    "A JSON-oriented task should return a valid JSON object with LocalScript values wrapped as lua{...}lua.",
+                    payload_check.detail,
                 )
             else:
                 pass_check("json_payload_shape")
@@ -280,6 +305,7 @@ class LocalScriptValidator:
                 check_results=check_results,
                 luac_status="skipped_with_reason",
                 luac_detail="No Lua blocks extracted.",
+                syntax_engine=syntax_engine,
             )
 
         pass_check("code_shape", f"blocks={len(lua_blocks)}")
@@ -294,6 +320,7 @@ class LocalScriptValidator:
                 pass_check(rule)
 
         luac_outcomes = [self._run_luac_check(block) for block in lua_blocks]
+        syntax_engine = luac_outcomes[0].engine if luac_outcomes else ""
         if any(outcome.status == "failed" for outcome in luac_outcomes):
             first_failed = next(outcome for outcome in luac_outcomes if outcome.status == "failed")
             luac_status = "failed"
@@ -302,8 +329,8 @@ class LocalScriptValidator:
                 fail_check(first_failed.issue.rule, first_failed.issue.message, severity=first_failed.issue.severity)
         elif any(outcome.status == "passed" for outcome in luac_outcomes):
             luac_status = "passed"
-            luac_detail = "luac parsed generated code successfully."
-            pass_check("luac_parse", luac_detail)
+            luac_detail = luac_outcomes[0].detail
+            pass_check("luac_parse", f"{syntax_engine}: {luac_detail}" if syntax_engine else luac_detail)
         else:
             luac_status = "skipped_with_reason"
             luac_detail = luac_outcomes[0].detail if luac_outcomes else "luac not executed."
@@ -319,6 +346,7 @@ class LocalScriptValidator:
                 check_results=check_results,
                 luac_status=luac_status,
                 luac_detail=luac_detail,
+                syntax_engine=syntax_engine,
             ),
             normalized_code,
         )
@@ -330,6 +358,7 @@ class LocalScriptValidator:
             check_results=check_results,
             luac_status=luac_status,
             luac_detail=luac_detail,
+            syntax_engine=syntax_engine,
             score_breakdown={**breakdown, "total": score},
         )
 
@@ -410,37 +439,18 @@ class LocalScriptValidator:
         return issues
 
     def _run_luac_check(self, code: str) -> LuacCheckOutcome:
-        luac_path = shutil.which("luac")
-        if luac_path is None:
-            return LuacCheckOutcome(status="skipped_with_reason", detail="luac binary is not available in PATH.")
-
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".lua", delete=False) as tmp_stream:
-            tmp_stream.write(code)
-            tmp_path = Path(tmp_stream.name)
-
-        try:
-            result = subprocess.run(
-                [luac_path, "-p", str(tmp_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
+        syntax_result = run_syntax_gate(code)
+        if syntax_result.status == "passed":
+            return LuacCheckOutcome(
+                status="passed",
+                detail=syntax_result.detail,
+                engine=syntax_result.engine,
             )
-        except subprocess.TimeoutExpired:
-            return LuacCheckOutcome(status="skipped_with_reason", detail="luac check timed out.")
-        except OSError as exc:
-            return LuacCheckOutcome(status="skipped_with_reason", detail=f"luac execution failed: {exc}")
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
-        if result.returncode == 0:
-            return LuacCheckOutcome(status="passed", detail="luac parsed generated code successfully.")
-
-        error_text = result.stderr.strip() or result.stdout.strip() or "luac reported a syntax error."
         return LuacCheckOutcome(
             status="failed",
-            detail=error_text,
-            issue=ValidationIssue(rule="luac_parse", message=error_text),
+            detail=syntax_result.detail,
+            engine=syntax_result.engine,
+            issue=ValidationIssue(rule="luac_parse", message=syntax_result.detail),
         )
 
     def _parse_json_payload(self, normalized_code: str) -> dict[str, Any] | None:
@@ -491,16 +501,7 @@ class LocalScriptValidator:
         return None
 
     def _extract_json_context(self, task: str) -> dict[str, Any] | None:
-        start = task.find("{")
-        end = task.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        raw_context = task[start : end + 1]
-        try:
-            payload = json.loads(raw_context)
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
+        return extract_json_context(task)
 
     def _wf_vars(self, context: dict[str, Any] | None) -> dict[str, Any]:
         if not context:

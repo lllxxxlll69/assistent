@@ -8,7 +8,11 @@ from unittest.mock import patch
 from assistant.config.settings import SettingsManager
 from assistant.localscript.eval_cases import get_eval_cases
 from assistant.localscript.evaluator import run_eval_suite
-from assistant.localscript.knowledge import LocalScriptKnowledgeBase, find_exact_prompt_overlaps
+from assistant.localscript.knowledge import (
+    LocalScriptKnowledgeBase,
+    find_exact_prompt_overlaps,
+    find_semantic_prompt_overlaps,
+)
 from assistant.localscript.service import LocalScriptService
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.models import Message
@@ -78,7 +82,8 @@ class LocalScriptValidatorTests(unittest.TestCase):
     def test_reports_structured_check_results(self) -> None:
         result = self.validator.validate(LAST_EMAIL_TASK, "return wf.vars.emails[#wf.vars.emails]")
         self.assertTrue(any(item.name == "luac_parse" for item in result.check_results))
-        self.assertIn(result.luac_status, {"passed", "skipped_with_reason"})
+        self.assertEqual(result.luac_status, "passed")
+        self.assertIn(result.syntax_engine, {"luac", "luaparser", "heuristic"})
 
     def test_rejects_template_markers(self) -> None:
         task = 'Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}'
@@ -105,6 +110,24 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertTrue(any(issue.rule in {"rest_result_source", "rest_cleanup_pattern"} for issue in result.issues))
 
 
+    def test_rejects_unix_time_that_ignores_timezone_offset(self) -> None:
+        task = 'Convert wf.initVariables.recallTime to a unix timestamp. {"wf":{"initVariables":{"recallTime":"2024-01-20T09:10:11+03:00"}}}'
+        code = (
+            'local y, m, d, h, mi, s = wf.initVariables.recallTime:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)")\n'
+            "return os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})"
+        )
+        result = self.validator.validate(task, code)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule == "timezone_offset" for issue in result.issues))
+
+    def test_rejects_malformed_iso_8601_shape(self) -> None:
+        task = "Build an ISO 8601 timestamp from workflow DATUM and TIME fields in Lua."
+        code = "return wf.vars.DATUM .. 'T' .. wf.vars.TIME .. ':00Z'"
+        result = self.validator.validate(task, code)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule == "iso_8601_shape" for issue in result.issues))
+
+
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
         knowledge = LocalScriptKnowledgeBase()
@@ -116,12 +139,17 @@ class LocalScriptKnowledgeTests(unittest.TestCase):
         knowledge = LocalScriptKnowledgeBase()
         guidance = knowledge.render_generation_guidance("Из полученного списка email получи последний.", limit=1)
         self.assertIn("Reference 1:", guidance)
+        self.assertIn("Shape guidance:", guidance)
         self.assertNotIn("Expected output:", guidance)
         self.assertNotIn("return wf.vars.emails[#wf.vars.emails]", guidance)
 
 
     def test_public_examples_do_not_exactly_match_public_eval_prompts(self) -> None:
         overlaps = find_exact_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)])
+        self.assertEqual(overlaps, [])
+
+    def test_public_guidance_has_no_high_semantic_overlap_with_eval_prompts(self) -> None:
+        overlaps = find_semantic_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)], threshold=0.8)
         self.assertEqual(overlaps, [])
 
 
@@ -142,7 +170,8 @@ class LocalScriptServiceTests(unittest.TestCase):
                 settings_manager=manager,
                 llm_client=StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"]),
             )
-            generation = service.generate(
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
                 "Доработай, чтобы вернуть последний email.",
                 context_messages=[Message(role="assistant", content="return wf.vars.emails[1]")],
                 allow_clarification=True,
@@ -161,7 +190,8 @@ class LocalScriptServiceTests(unittest.TestCase):
                 ]
             )
             service = LocalScriptService(settings_manager=manager, llm_client=llm)
-            generation = service.generate(
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
                 'Используй workflow контекст и вытащи orderId. {"wf":{"vars":{"orderId":"123"}}}',
                 allow_clarification=False,
             )
@@ -177,11 +207,12 @@ class LocalScriptServiceTests(unittest.TestCase):
                 settings_manager=manager,
                 llm_client=StubLLMClient(['{"squared":"lua{return 25}lua"}']),
             )
-            generation = service.generate(
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
                 "Доработай и верни json payload с полем squared.",
-                allow_clarification=False,
-                interaction_mode="judged",
-            )
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
         self.assertIsNone(generation.clarification_question)
         self.assertGreaterEqual(len(generation.assumptions), 1)
         self.assertTrue(any(item.stage == "assumed" for item in generation.trace))
@@ -194,14 +225,15 @@ class LocalScriptServiceTests(unittest.TestCase):
                 settings_manager=manager,
                 llm_client=StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"]),
             )
-            generation = service.generate(
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
                 LAST_EMAIL_TASK,
                 allow_clarification=False,
-                interaction_mode="judged",
-            )
+                    interaction_mode="judged",
+                )
         self.assertEqual(generation.code, "return wf.vars.emails[#wf.vars.emails]")
-        self.assertEqual(generation.selected_strategy, "baseline")
-        self.assertTrue(any(item.stage == "llm_cycle_started" for item in generation.trace))
+        self.assertEqual(generation.selected_strategy, "symbolic")
+        self.assertTrue(any(item.stage in {"symbolic_generated", "llm_cycle_started"} for item in generation.trace))
 
     def test_judged_generation_uses_dedicated_localscript_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -211,14 +243,19 @@ class LocalScriptServiceTests(unittest.TestCase):
                 localscript_repair_attempts=0,
                 localscript_model="contest-model:1b",
             )
-            llm = StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"])
-            service = LocalScriptService(settings_manager=manager, llm_client=llm)
-            generation = service.generate(
-                LAST_EMAIL_TASK,
-                allow_clarification=False,
-                interaction_mode="judged",
+            llm = StubLLMClient(
+                [
+                    "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result"
+                ]
             )
-        self.assertEqual(generation.code, "return wf.vars.emails[#wf.vars.emails]")
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    "Очисти RESTbody result и оставь только ID, ENTITY_ID и CALL.",
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertIn("wf.vars.RESTbody.result", generation.code)
         self.assertEqual(llm.requested_models, ["contest-model:1b"])
 
     def test_generation_prompt_includes_self_check_and_reference_examples(self) -> None:
@@ -234,9 +271,40 @@ class LocalScriptServiceTests(unittest.TestCase):
             )
         system_prompt = messages[0]["content"]
         self.assertIn("Internal self-check", system_prompt)
-        self.assertIn("Reference implementations for similar task shapes", system_prompt)
-        self.assertIn("Expected output:", system_prompt)
-        self.assertIn("return wf.vars.inboxEmails[#wf.vars.inboxEmails]", system_prompt)
+        self.assertIn("Reference guidance for similar task shapes", system_prompt)
+        self.assertIn("Family-specific hints:", system_prompt)
+        self.assertNotIn("Expected output:", system_prompt)
+        self.assertNotIn("return wf.vars.inboxEmails[#wf.vars.inboxEmails]", system_prompt)
+
+    def test_symbolic_unix_time_candidate_bypasses_llm_for_judged_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            llm = StubLLMClient([])
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    'Convert wf.initVariables.recallTime to a unix timestamp. {"wf":{"initVariables":{"recallTime":"2024-01-20T09:10:11+03:00"}}}',
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertEqual(generation.selected_strategy, "symbolic")
+        self.assertIn("tz_h", generation.code)
+        self.assertEqual(llm.requested_models, [])
+
+    def test_symbolic_json_payload_candidate_uses_requested_workflow_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            llm = StubLLMClient([])
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    'Return JSON payload with fields orderId and customerEmail. {"wf":{"vars":{"orderId":"ORD-7","customerEmail":"a@example.com"}}}',
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertEqual(generation.selected_strategy, "symbolic")
+        self.assertIn('"orderId":"lua{return wf.vars.orderId}lua"', generation.code)
+        self.assertIn('"customerEmail":"lua{return wf.vars.customerEmail}lua"', generation.code)
 
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
@@ -251,7 +319,11 @@ class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
                     text = (
                         "local result = wf.vars.RESTbody.result\n"
                         "for _, filtered_entry in ipairs(result) do\n"
-                        "    filtered_entry.extra = nil\n"
+                        "    for key, _ in pairs(filtered_entry) do\n"
+                        "        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n"
+                        "            filtered_entry[key] = nil\n"
+                        "        end\n"
+                        "    end\n"
                         "end\n"
                         "return result"
                     )
@@ -265,8 +337,10 @@ class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
                     )
                 else:
                     text = (
-                        "local timestamp = os.time({year = 2023, month = 10, day = 15, hour = 15, min = 30, sec = 0})\n"
-                        "return timestamp"
+                        "local y, m, d, h, mi, s, sign, tz_h, tz_m = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)([%+%-])(%d%d):(%d%d)$\")\n"
+                        "local offset = (tonumber(tz_h) * 3600) + (tonumber(tz_m) * 60)\n"
+                        "local timestamp = os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})\n"
+                        "return sign == \"+\" and (timestamp - offset) or (timestamp + offset)"
                     )
                 return type(
                     "StubResponse",
@@ -279,6 +353,7 @@ class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):
                             "candidate_count": 1,
                             "selected_strategy": "baseline",
                             "luac_status": "skipped_with_reason",
+                            "syntax_engine": "luaparser",
                             "repair_attempts_used": 0,
                             "assumptions": [],
                         },

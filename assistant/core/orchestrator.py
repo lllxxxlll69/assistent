@@ -16,6 +16,7 @@ from assistant.models import (
     ActionLogEntry,
     ActionType,
     AssistantResponse,
+    Message,
     RetrievalChunk,
     VisionRequest,
 )
@@ -172,6 +173,7 @@ class Orchestrator:
         user_already_recorded: bool = False,
         use_memory_context: bool = False,
         count_request: bool = True,
+        context_messages_override: list[Message] | None = None,
     ) -> AssistantResponse:
         if count_request:
             self.request_count += 1
@@ -179,7 +181,10 @@ class Orchestrator:
         if persist_memory and not user_already_recorded:
             self.memory_manager.add_message("user", user_input)
 
-        context_messages = self.memory_manager.get_context() if use_memory_context else []
+        if context_messages_override is not None:
+            context_messages = context_messages_override
+        else:
+            context_messages = self.memory_manager.get_context() if use_memory_context else []
         generation = await asyncio.to_thread(
             self.localscript_service.generate,
             user_input,
@@ -451,6 +456,7 @@ class Orchestrator:
             "candidate_count": generation.candidate_count,
             "selected_strategy": generation.selected_strategy,
             "luac_status": generation.validation.luac_status,
+            "syntax_engine": generation.validation.syntax_engine,
             "repair_attempts_used": generation.repair_attempts_used,
             "assumptions": list(generation.assumptions),
             "trace": [f"{item.stage}:{item.status}" for item in generation.trace],

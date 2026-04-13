@@ -12,13 +12,15 @@ Main code path:
 - `assistant/core/orchestrator.py`
 - `assistant/localscript/service.py`
 
-In judged mode the system does not ask follow-up questions. It either:
+In default judged mode the system does not ask follow-up questions. It either:
 
 - applies minimal explicit assumptions
 - generates candidates
 - validates and repairs them
 - returns final code
 - or fails fast if the runtime contour is invalid
+
+For iterative demo mode, the same endpoint also accepts explicit `context_messages` and `allow_clarification=true`, so the external refinement loop is still reproducible through the public API.
 
 ## 2. Runtime enforcement
 
@@ -113,9 +115,10 @@ Checks include:
 - workflow-shape heuristics
 - JSON payload wrapper rules
 - array helper rules
-- optional `luac -p`
+- mandatory local syntax gate via `luac` or bundled `luaparser`
+- stronger datetime semantic checks for ISO 8601 and timezone-aware unix conversion
 
-The validator is heuristic, but the project is explicit about that and does not present it as a full Lua interpreter.
+The validator is still not a full Lua interpreter, but the syntax gate is now reproducible locally even when `luac` is absent from `PATH`.
 
 ## 7. Eval methodology and public eval integrity
 
@@ -128,12 +131,18 @@ Public knowledge examples:
 
 - `assistant/localscript/knowledge.py`
 
-The repo now includes an exact-overlap audit between public eval prompts and public knowledge prompts. The audit is surfaced in:
+The repo now includes:
+
+- an exact-overlap audit between public eval prompts and public knowledge prompts
+- a semantic-overlap audit between public eval prompts and the public knowledge guidance cards
+- a semantic case-match property in eval reports for the main task families
+
+These audits are surfaced in:
 
 - `python -m assistant.localscript.self_check`
 - `python -m assistant.localscript.evaluator ...`
 
-This prevents silent drift back to identical example/eval prompts.
+This reduces silent drift back to identical or near-identical example/eval prompts.
 
 ## 8. Reproducibility workflow
 
@@ -144,13 +153,14 @@ Recommended verification flow:
 3. `docker compose up --build`
 4. `python -m assistant.localscript.self_check`
 5. `python -m assistant.localscript.evaluator --suite full --json-out artifacts/localscript_eval_report.json`
+6. `python -m assistant.localscript.e2e --suite full --json-out artifacts/localscript_e2e_report.json`
 
 ## 9. Honest limits
 
 The project does not claim:
 
 - guaranteed correctness on every unseen LocalScript task
-- semantic proof of all generated code
+- semantic proof of every possible generated code path
 - byte-for-byte reproducibility unless a digest is explicitly pinned
 
 What it does claim, and now enforces in code, is:

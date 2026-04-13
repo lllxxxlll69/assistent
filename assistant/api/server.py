@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from assistant.app import AssistantBackend, build_backend
 from assistant.config.settings import Settings
 from assistant.llm.client import LLMClientError
+from assistant.models import Message
 
 
 class LocalScriptAPIHandler(BaseHTTPRequestHandler):
@@ -60,15 +61,24 @@ class LocalScriptAPIHandler(BaseHTTPRequestHandler):
         if not isinstance(prompt, str) or not prompt.strip():
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Field 'prompt' must be a non-empty string."})
             return
+        try:
+            context_messages = self._parse_context_messages(request_payload.get("context_messages"))
+            allow_clarification = self._coerce_bool(request_payload.get("allow_clarification"), default=False)
+            persist_memory = self._coerce_bool(request_payload.get("persist_memory"), default=False)
+            use_memory_context = self._coerce_bool(request_payload.get("use_memory_context"), default=False)
+        except ValueError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
 
         backend = self.backend or build_backend()
         try:
             response = asyncio.run(
                 backend.orchestrator.generate_localscript_response(
                     prompt.strip(),
-                    allow_clarification=False,
-                    persist_memory=False,
-                    use_memory_context=False,
+                    allow_clarification=allow_clarification,
+                    persist_memory=persist_memory,
+                    use_memory_context=use_memory_context,
+                    context_messages_override=context_messages,
                 )
             )
         except LLMClientError as exc:
@@ -80,7 +90,17 @@ class LocalScriptAPIHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Internal server error."})
             return
 
-        self._send_json(HTTPStatus.OK, {"code": response.text})
+        selected_strategy = str(response.metrics.get("selected_strategy", ""))
+        clarification_question = response.text if selected_strategy == "clarification" else None
+        code = "" if clarification_question is not None else response.text
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "code": code,
+                "clarification_question": clarification_question,
+                "metrics": response.metrics,
+            },
+        )
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print(f"[api] {self.address_string()} - {format % args}")
@@ -110,6 +130,31 @@ class LocalScriptAPIHandler(BaseHTTPRequestHandler):
         if api_key == settings.api_token:
             return True
         return False
+
+    def _coerce_bool(self, value: object, *, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        raise ValueError("Boolean API fields must be true or false.")
+
+    def _parse_context_messages(self, value: object) -> list[Message] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("Field 'context_messages' must be an array of {role, content} objects.")
+        parsed: list[Message] = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("Each context message must be an object.")
+            role = item.get("role")
+            content = item.get("content")
+            if not isinstance(role, str) or role not in {"system", "user", "assistant"}:
+                raise ValueError("Each context message must contain role=system|user|assistant.")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("Each context message must contain non-empty string content.")
+            parsed.append(Message(role=role, content=content.strip()))
+        return parsed
 
     def _settings(self) -> Settings:
         backend = self.backend or build_backend()
