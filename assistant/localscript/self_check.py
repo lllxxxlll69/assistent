@@ -8,8 +8,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from assistant.app import build_backend
-from assistant.config.settings import SettingsManager
+from assistant.config.settings import FIXED_BATCH_SIZE, FIXED_CONTEXT_SIZE, FIXED_NUM_PREDICT, SettingsManager
+from assistant.llm.client import LLMClientError
+from assistant.localscript.eval_cases import get_eval_cases
 from assistant.localscript.evaluator import run_eval_suite
+from assistant.localscript.knowledge import find_exact_prompt_overlaps
+from assistant.localscript.runtime import RuntimeProbeError, build_runtime_constraints, probe_ollama_runtime
 
 
 @dataclass(slots=True)
@@ -36,6 +40,8 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
     ]
     docker_compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
     dockerfile_text = Path("Dockerfile").read_text(encoding="utf-8")
+    overlap_report = find_exact_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)])
+
     checks: list[CheckResult] = [
         CheckResult(
             name="localscript_profile",
@@ -43,29 +49,54 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             detail=f"assistant_profile={settings.assistant_profile}",
         ),
         CheckResult(
+            name="localscript_model_tag_locked",
+            status=_status(":" in settings.localscript_model),
+            detail=f"localscript_model={settings.localscript_model}",
+        ),
+        CheckResult(
+            name="assistant_fixed_context_size",
+            status=_status(settings.context_size == FIXED_CONTEXT_SIZE),
+            detail=f"context_size={settings.context_size}",
+        ),
+        CheckResult(
+            name="assistant_fixed_num_predict",
+            status=_status(settings.max_tokens == FIXED_NUM_PREDICT),
+            detail=f"max_tokens={settings.max_tokens}",
+        ),
+        CheckResult(
             name="fixed_context_size",
-            status=_status(settings.localscript_context_size == 4096),
+            status=_status(settings.localscript_context_size == FIXED_CONTEXT_SIZE),
             detail=f"localscript_context_size={settings.localscript_context_size}",
         ),
         CheckResult(
             name="fixed_num_predict",
-            status=_status(settings.localscript_num_predict == 256),
+            status=_status(settings.localscript_num_predict == FIXED_NUM_PREDICT),
             detail=f"localscript_num_predict={settings.localscript_num_predict}",
         ),
         CheckResult(
             name="fixed_batch_size",
-            status=_status(settings.batch_size == 1),
+            status=_status(settings.batch_size == FIXED_BATCH_SIZE),
             detail=f"batch_size={settings.batch_size}",
         ),
         CheckResult(
             name="local_runtime_endpoint",
-            status=_status(settings.api_url.startswith(("http://127.0.0.1", "http://localhost"))),
+            status=_status(settings.api_url.startswith(("http://127.0.0.1", "http://localhost", "http://ollama"))),
             detail=f"api_url={settings.api_url}",
         ),
         CheckResult(
             name="default_api_host_is_local",
-            status=_status(settings.api_host in {"127.0.0.1", "localhost"}),
+            status=_status(settings.api_host in {"127.0.0.1", "localhost", "0.0.0.0"}),
             detail=f"api_host={settings.api_host}",
+        ),
+        CheckResult(
+            name="runtime_guard_enabled",
+            status=_status(settings.localscript_runtime_guard),
+            detail=f"localscript_runtime_guard={settings.localscript_runtime_guard}",
+        ),
+        CheckResult(
+            name="full_gpu_required",
+            status=_status(settings.localscript_require_full_gpu),
+            detail=f"localscript_require_full_gpu={settings.localscript_require_full_gpu}",
         ),
         CheckResult(
             name="openapi_contract",
@@ -78,6 +109,16 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             detail="docker-compose.yml",
         ),
         CheckResult(
+            name="compose_parallel_one",
+            status=_status('OLLAMA_NUM_PARALLEL: "1"' in docker_compose_text),
+            detail="docker-compose.yml requires OLLAMA_NUM_PARALLEL=1",
+        ),
+        CheckResult(
+            name="compose_single_loaded_model",
+            status=_status('OLLAMA_MAX_LOADED_MODELS: "1"' in docker_compose_text),
+            detail="docker-compose.yml requires OLLAMA_MAX_LOADED_MODELS=1",
+        ),
+        CheckResult(
             name="pinned_python_dependencies",
             status=_status(all("==" in line for line in requirements_lines)),
             detail="requirements.txt uses exact pins" if requirements_lines else "requirements.txt is empty",
@@ -86,6 +127,11 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             name="docker_images_not_latest",
             status=_status(":latest" not in docker_compose_text and ":latest" not in dockerfile_text),
             detail="Checked Dockerfile and docker-compose.yml for ':latest'.",
+        ),
+        CheckResult(
+            name="knowledge_eval_exact_overlap",
+            status=_status(not overlap_report),
+            detail=f"exact_overlap_count={len(overlap_report)}",
         ),
     ]
 
@@ -98,6 +144,32 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             required=False,
         )
     )
+
+    runtime_report: dict[str, object]
+    try:
+        warm_up_seconds = backend.orchestrator.llm_client.warm_up(
+            settings.localscript_model,
+            max_tokens_override=8,
+            context_size_override=settings.localscript_context_size,
+            temperature_override=settings.localscript_temperature,
+        )
+        runtime = probe_ollama_runtime(settings)
+        runtime_report = {
+            "warm_up_seconds": round(warm_up_seconds, 3),
+            **runtime.to_dict(),
+        }
+        checks.append(
+            CheckResult(
+                name="gpu_telemetry_visible",
+                status=_status(bool(runtime.gpu_samples)),
+                detail=f"gpu_samples={len(runtime.gpu_samples)}",
+            )
+        )
+        for name, passed, detail in build_runtime_constraints(settings, runtime):
+            checks.append(CheckResult(name=name, status=_status(passed), detail=detail))
+    except (LLMClientError, RuntimeProbeError) as exc:
+        runtime_report = {"error": str(exc)}
+        checks.append(CheckResult(name="judged_runtime_probe", status="failed", detail=str(exc)))
 
     try:
         smoke_report = await run_eval_suite(smoke_only=True)
@@ -145,6 +217,7 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
         "checks": [asdict(check) for check in checks],
         "settings": {
             "model": settings.model,
+            "localscript_model": settings.localscript_model,
             "vision_model": settings.vision_model,
             "api_url": settings.api_url,
             "api_host": settings.api_host,
@@ -152,6 +225,16 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             "localscript_num_predict": settings.localscript_num_predict,
             "batch_size": settings.batch_size,
             "assistant_profile": settings.assistant_profile,
+            "localscript_runtime_guard": settings.localscript_runtime_guard,
+            "localscript_require_full_gpu": settings.localscript_require_full_gpu,
+            "localscript_full_gpu_ratio": settings.localscript_full_gpu_ratio,
+            "localscript_max_vram_bytes": settings.localscript_max_vram_bytes,
+            "localscript_expected_digest": settings.localscript_expected_digest,
+        },
+        "runtime_report": runtime_report,
+        "knowledge_eval_overlap": {
+            "exact_overlap_count": len(overlap_report),
+            "exact_overlaps": overlap_report,
         },
         "smoke_report": smoke_report,
         "full_report": full_report,

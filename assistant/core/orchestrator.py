@@ -458,4 +458,5 @@ class Orchestrator:
                 item.source: sum(1 for candidate in generation.candidate_reports if candidate.source == item.source)
                 for item in generation.candidate_reports
             },
+            "runtime_info": dict(generation.runtime_info),
         }

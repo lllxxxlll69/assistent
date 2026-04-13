@@ -6,6 +6,7 @@ import json
 import tempfile
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 from assistant.app import build_backend
 from assistant.config.settings import SettingsManager
 from assistant.localscript.eval_cases import EvalCase, get_eval_cases
+from assistant.localscript.knowledge import find_exact_prompt_overlaps
 from assistant.models import Message
 
 
@@ -88,6 +90,7 @@ async def run_eval_suite(
     json_out: str | Path | None = None,
 ) -> dict[str, Any]:
     cases = get_eval_cases(smoke_only=smoke_only)
+    overlap_report = find_exact_prompt_overlaps([(case.id, case.prompt) for case in cases])
     with tempfile.TemporaryDirectory() as tmp_dir:
         temp_root = Path(tmp_dir)
         settings_manager = SettingsManager(temp_root / "settings.json")
@@ -103,6 +106,7 @@ async def run_eval_suite(
         by_category_totals: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "total": 0})
         by_strategy = Counter[str]()
         by_luac_status = Counter[str]()
+        runtime_guard_results = Counter[str]()
         repair_attempts: list[int] = []
         assumption_counts: list[int] = []
 
@@ -157,6 +161,11 @@ async def run_eval_suite(
                 by_category_totals[case.category]["passed"] += 1
             by_strategy.update([result.selected_strategy or "unknown"])
             by_luac_status.update([str(response.metrics.get("luac_status", "unknown"))])
+            runtime_info = response.metrics.get("runtime_info")
+            if isinstance(runtime_info, dict) and runtime_info:
+                runtime_guard_results.update(["present"])
+            else:
+                runtime_guard_results.update(["absent"])
             repair_attempts.append(int(response.metrics.get("repair_attempts_used", 0)))
             assumption_counts.append(len(response.metrics.get("assumptions", [])))
             for reason in case_failures:
@@ -165,8 +174,13 @@ async def run_eval_suite(
         total = len(results)
         passed = sum(1 for item in results if item.ok)
         report = {
+            "report_generated_at": datetime.now(timezone.utc).isoformat(),
+            "report_schema_version": 2,
             "suite": "smoke" if smoke_only else "full",
             "model": settings.model,
+            "localscript_model": settings.localscript_model,
+            "localscript_runtime_guard": settings.localscript_runtime_guard,
+            "localscript_require_full_gpu": settings.localscript_require_full_gpu,
             "localscript_context_size": settings.localscript_context_size,
             "localscript_num_predict": settings.localscript_num_predict,
             "cases_total": total,
@@ -174,6 +188,11 @@ async def run_eval_suite(
             "pass_rate": round((passed / total) * 100, 2) if total else 0.0,
             "luac_status_distribution": dict(by_luac_status),
             "selected_strategy_distribution": dict(by_strategy),
+            "runtime_guard_distribution": dict(runtime_guard_results),
+            "knowledge_eval_overlap": {
+                "exact_overlap_count": len(overlap_report),
+                "exact_overlaps": overlap_report,
+            },
             "failure_reasons": dict(failure_reasons),
             "avg_repair_attempts_used": round(mean(repair_attempts), 3) if repair_attempts else 0.0,
             "avg_assumptions_used": round(mean(assumption_counts), 3) if assumption_counts else 0.0,

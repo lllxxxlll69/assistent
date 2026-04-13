@@ -1,100 +1,161 @@
-# Contest Evidence Notes
+# Contest Evidence
 
-## 1. Что именно является judged path
+## 1. Judged path
 
-Основной judged-интерфейс:
+The judged interface is:
+
 - `POST /generate`
 
-Реализация:
+Main code path:
+
 - `assistant/api/server.py`
 - `assistant/core/orchestrator.py`
 - `assistant/localscript/service.py`
 
-Judged mode запускается без интерактивных уточнений. Если вход неоднозначен, сервис:
-- не уходит в бесконечные вопросы;
-- фиксирует безопасные допущения во внутреннем trace;
-- пытается выбрать минимально рискованную интерпретацию.
+In judged mode the system does not ask follow-up questions. It either:
 
-## 2. Что реально делает LocalScript pipeline
+- applies minimal explicit assumptions
+- generates candidates
+- validates and repairs them
+- returns final code
+- or fails fast if the runtime contour is invalid
 
-Pipeline состоит из следующих этапов:
+## 2. Runtime enforcement
 
-1. mode guard для не-Lua запросов
-2. clarification/assumption decision
-3. LLM candidate generation
-4. validation
-5. ranking
-6. focused repair loop
-7. final quality gate
+The project now contains a strict runtime guard for judged mode.
 
-Файлы:
+Implementation:
+
+- `assistant/localscript/runtime.py`
 - `assistant/localscript/service.py`
-- `assistant/localscript/knowledge.py`
+
+The guard performs:
+
+1. a warm-up request for the dedicated judged model
+2. a live probe of Ollama `/api/version`
+3. a live probe of Ollama `/api/ps`
+4. an optional `nvidia-smi` sample
+5. constraint checks on:
+   - exact judged model tag
+   - one loaded Ollama model only
+   - matching context length
+   - VRAM budget
+   - full GPU ratio
+   - digest presence
+   - optional exact digest pin
+
+If any required constraint fails, judged generation aborts with an error instead of silently running with CPU offload.
+
+## 3. Fixed contest settings
+
+Expected judged contour:
+
+- model tag: `qwen2.5-coder:7b`
+- `num_ctx=4096`
+- `num_predict=256`
+- `batch=1`
+- `parallel=1`
+- `num_gpu=-1`
+
+Compose contour:
+
+- `docker-compose.yml`
+- `.env.contest.example`
+
+Important compose limits:
+
+- `OLLAMA_NUM_PARALLEL=1`
+- `OLLAMA_MAX_LOADED_MODELS=1`
+- `ASSISTANT_LOCALSCRIPT_RUNTIME_GUARD=true`
+- `ASSISTANT_LOCALSCRIPT_REQUIRE_FULL_GPU=true`
+- `ASSISTANT_LOCALSCRIPT_MAX_VRAM_BYTES=8000000000`
+
+## 4. Local-only evidence
+
+Generation path uses:
+
+- local Ollama HTTP API
+- local Python code
+- local validation
+- local knowledge examples
+- local file and search tools
+
+Tracked code does not depend on OpenAI, Anthropic, or another external AI vendor for generation.
+
+## 5. Agentic iteration evidence
+
+The system is not a single-shot answer.
+
+Agentic behavior is implemented in:
+
+- `assistant/localscript/service.py`
+
+Behavior:
+
+- clarification question in interactive mode
+- assumption capture in judged mode
+- multi-candidate generation
+- ranking
+- repair loop over invalid or weak candidates
+
+## 6. Validation evidence
+
+Validation lives in:
+
 - `assistant/localscript/validator.py`
 
-## 3. Что именно проверяет validator
+Checks include:
 
-Validator не является полноценным интерпретатором Lua, но проверяет:
-- отсутствие markdown fences
-- запрет JsonPath
-- корректное использование `wf.vars` / `wf.initVariables`
-- обнаружение hardcoded sample values
-- правила `_utils.array.new()` и `_utils.array.markAsArray(...)`
-- JSON payload с `lua{...}lua`
-- пустые контейнеры вместо кода
-- placeholders
-- базовую структурную целостность
-- `luac -p`, если `luac` доступен в `PATH`
+- no markdown fences
+- no JsonPath
+- correct `wf.vars` / `wf.initVariables` usage
+- placeholder and template rejection
+- workflow-shape heuristics
+- JSON payload wrapper rules
+- array helper rules
+- optional `luac -p`
 
-Важно:
-- если `luac` недоступен, это не скрывается, а отражается в `luac_status`
-- validator остаётся эвристическим и не доказывает семантику для всех задач
+The validator is heuristic, but the project is explicit about that and does not present it as a full Lua interpreter.
 
-## 4. Eval methodology
+## 7. Eval methodology and public eval integrity
 
-В репозитории есть два уровня оценки:
+Public eval suite:
 
-- smoke suite: быстрый набор критичных кейсов
-- full eval suite: расширенный набор категорий
-
-Файлы:
 - `assistant/localscript/eval_cases.py`
 - `assistant/localscript/evaluator.py`
-- `assistant/localscript/benchmark.py`
 
-Eval-отчёт содержит:
-- total / passed / pass_rate
-- category breakdown
-- strategy distribution
-- luac status distribution
-- failure reasons
-- repair / assumptions metrics
+Public knowledge examples:
 
-## 5. Reproducibility и local-only
+- `assistant/localscript/knowledge.py`
 
-В runtime проект использует:
-- локальный Ollama endpoint
-- локальные JSON settings/history
-- локальные file/search tools
+The repo now includes an exact-overlap audit between public eval prompts and public knowledge prompts. The audit is surfaced in:
 
-В tracked-коде нет вызовов OpenAI/Anthropic SDK.
+- `python -m assistant.localscript.self_check`
+- `python -m assistant.localscript.evaluator ...`
 
-Дополнительно:
-- `requirements.txt` pinned по exact versions
-- `docker-compose.yml` не использует `latest`
-- `self_check` отдельно проверяет локальность endpoint и smoke path
+This prevents silent drift back to identical example/eval prompts.
 
-Ограничения reproducibility:
-- Docker images pinned по tag, но не по digest
-- Ollama model tag указан, но digest модели не зафиксирован в репозитории
-- отсутствие `luac` на машине понижает строгость синтаксической проверки
+## 8. Reproducibility workflow
 
-## 6. Что нельзя честно утверждать
+Recommended verification flow:
 
-Нельзя утверждать, что:
-- проект гарантирует высокий pass rate на неизвестной закрытой выборке;
-- все сгенерированные ответы semantically correct;
-- reproduсibility абсолютна до байта;
-- GPU-only / no CPU offload автоматически доказаны только кодом репозитория.
+1. `ollama pull qwen2.5-coder:7b`
+2. configure contest env from `.env.contest.example`
+3. `docker compose up --build`
+4. `python -m assistant.localscript.self_check`
+5. `python -m assistant.localscript.evaluator --suite full --json-out artifacts/localscript_eval_report.json`
 
-Эти ограничения нужно проговаривать на защите явно.
+## 9. Honest limits
+
+The project does not claim:
+
+- guaranteed correctness on every unseen LocalScript task
+- semantic proof of all generated code
+- byte-for-byte reproducibility unless a digest is explicitly pinned
+
+What it does claim, and now enforces in code, is:
+
+- local-only generation
+- reproducible judged parameters
+- runtime rejection of partial-offload judged runs
+- visible evidence for validation, eval, and overlap checks

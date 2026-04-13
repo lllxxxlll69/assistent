@@ -6,7 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from assistant.config.settings import Settings, SettingsManager
+from assistant.config.settings import (
+    FIXED_BATCH_SIZE,
+    FIXED_CONTEXT_SIZE,
+    FIXED_NUM_PREDICT,
+    Settings,
+    SettingsManager,
+)
 from assistant.llm.client import LLMClient
 from assistant.localscript.service import LocalScriptService
 from assistant.localscript.validator import LocalScriptValidator
@@ -42,6 +48,23 @@ class BugfixAndSecurityTests(unittest.TestCase):
         self.assertEqual(settings.gpu_layers, 42)
         self.assertEqual(settings.keep_alive, "45m")
         self.assertTrue(settings.low_vram)
+
+    def test_settings_manager_enforces_fixed_runtime_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            settings = manager.update_settings(
+                max_tokens=1200,
+                context_size=8192,
+                batch_size=7,
+                localscript_context_size=2048,
+                localscript_num_predict=1024,
+            )
+
+        self.assertEqual(settings.max_tokens, FIXED_NUM_PREDICT)
+        self.assertEqual(settings.context_size, FIXED_CONTEXT_SIZE)
+        self.assertEqual(settings.batch_size, FIXED_BATCH_SIZE)
+        self.assertEqual(settings.localscript_context_size, FIXED_CONTEXT_SIZE)
+        self.assertEqual(settings.localscript_num_predict, FIXED_NUM_PREDICT)
 
     def test_memory_summary_does_not_recurse_on_previous_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -136,6 +159,28 @@ class BugfixAndSecurityTests(unittest.TestCase):
         self.assertEqual(payload["options"]["main_gpu"], 0)
         self.assertEqual(payload["options"]["num_thread"], 8)
         self.assertTrue(payload["options"]["low_vram"])
+
+    def test_llm_payload_enforces_fixed_contest_limits(self) -> None:
+        client = LLMClient(
+            Settings(
+                api_url="http://127.0.0.1:11434/api/chat",
+                max_tokens=4096,
+                context_size=16384,
+                batch_size=9,
+            )
+        )
+
+        payload = client._build_payload(
+            messages=[{"role": "user", "content": "test"}],
+            model="qwen2.5-coder:7b",
+            stream=False,
+            max_tokens_override=32,
+            context_size_override=2048,
+        )
+
+        self.assertEqual(payload["options"]["num_predict"], FIXED_NUM_PREDICT)
+        self.assertEqual(payload["options"]["num_ctx"], FIXED_CONTEXT_SIZE)
+        self.assertEqual(payload["options"]["num_batch"], FIXED_BATCH_SIZE)
 
 
 if __name__ == "__main__":

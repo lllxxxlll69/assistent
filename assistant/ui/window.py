@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 )
 
 from assistant.app import AssistantBackend, build_backend
-from assistant.config.settings import Settings
+from assistant.config.settings import FIXED_CONTEXT_SIZE, FIXED_NUM_PREDICT, Settings
 from assistant.local_chat.window import LocalChatWindow
 from assistant.llm.client import LLMClientError
 from assistant.models import AssistantResponse, utc_now_iso
@@ -519,6 +519,18 @@ class SettingsDialog(QDialog):
         title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(14)
+        scroll_area.setWidget(scroll_content)
+
         connection_box = QGroupBox("Модель и подключение")
         connection_form = QFormLayout(connection_box)
         self.model_edit = QLineEdit(settings.model)
@@ -529,7 +541,7 @@ class SettingsDialog(QDialog):
         connection_form.addRow("Vision model", self.vision_model_edit)
         connection_form.addRow("API URL", self.api_url_edit)
         connection_form.addRow("Search root", self.search_root_edit)
-        layout.addWidget(connection_box)
+        scroll_layout.addWidget(connection_box)
 
         generation_box = QGroupBox("Генерация и контекст")
         generation_form = QFormLayout(generation_box)
@@ -537,10 +549,10 @@ class SettingsDialog(QDialog):
         self.temperature_spin.setRange(0.0, 2.0)
         self.temperature_spin.setSingleStep(0.1)
         self.max_tokens_spin = QSpinBox()
-        self.max_tokens_spin.setRange(64, 16000)
+        self.max_tokens_spin.setRange(FIXED_NUM_PREDICT, FIXED_NUM_PREDICT)
         self.context_size_spin = QSpinBox()
-        self.context_size_spin.setRange(512, 32768)
-        self.context_size_spin.setSingleStep(512)
+        self.context_size_spin.setRange(FIXED_CONTEXT_SIZE, FIXED_CONTEXT_SIZE)
+        self.context_size_spin.setSingleStep(FIXED_CONTEXT_SIZE)
         self.memory_length_spin = QSpinBox()
         self.memory_length_spin.setRange(1, 200)
         self.memory_max_tokens_spin = QSpinBox()
@@ -560,6 +572,8 @@ class SettingsDialog(QDialog):
         self.cpu_threads_spin = QSpinBox()
         self.cpu_threads_spin.setRange(0, 128)
         self.keep_alive_edit = QLineEdit()
+        self.max_tokens_spin.setToolTip("Зафиксировано техническими ограничениями: 256")
+        self.context_size_spin.setToolTip("Зафиксировано техническими ограничениями: 4096")
         self.stream_check = QCheckBox("Показывать ответ по мере генерации")
         self.show_logs_check = QCheckBox("Показывать окно логов")
         self.low_vram_check = QCheckBox("Включить low VRAM режим")
@@ -579,7 +593,7 @@ class SettingsDialog(QDialog):
         generation_form.addRow("", self.stream_check)
         generation_form.addRow("", self.show_logs_check)
         generation_form.addRow("", self.low_vram_check)
-        layout.addWidget(generation_box)
+        scroll_layout.addWidget(generation_box)
 
         stats_box = QGroupBox("Память и контекст")
         stats_layout = QVBoxLayout(stats_box)
@@ -595,7 +609,8 @@ class SettingsDialog(QDialog):
         self.summary_preview.setReadOnly(True)
         self.summary_preview.setMinimumHeight(120)
         stats_layout.addWidget(self.summary_preview)
-        layout.addWidget(stats_box)
+        scroll_layout.addWidget(stats_box)
+        scroll_layout.addStretch(1)
 
         buttons = QHBoxLayout()
         self.reset_button = QPushButton("Сброс")
@@ -611,6 +626,20 @@ class SettingsDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
         save_button.clicked.connect(self.accept)
         self._fill_form(settings)
+        QTimer.singleShot(0, self._constrain_to_screen)
+
+    def _constrain_to_screen(self) -> None:
+        screen = self.parentWidget().screen() if self.parentWidget() is not None else self.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+
+        available = screen.availableGeometry()
+        max_width = min(max(320, available.width() - 40), available.width())
+        max_height = min(max(360, available.height() - 40), available.height())
+        self.setMaximumSize(max_width, max_height)
+        self.resize(min(self.width(), max_width), min(self.height(), max_height))
 
     def _fill_form(self, settings: Settings) -> None:
         self.model_edit.setText(settings.model)

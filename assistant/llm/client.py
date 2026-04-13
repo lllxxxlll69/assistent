@@ -61,7 +61,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in minimal local env
 
     requests = _CompatRequestsModule()
 
-from assistant.config.settings import Settings
+from assistant.config.settings import FIXED_BATCH_SIZE, FIXED_CONTEXT_SIZE, FIXED_NUM_PREDICT, Settings
 
 
 class LLMClientError(RuntimeError):
@@ -238,14 +238,22 @@ class LLMClient:
             raise LLMClientError(f"Vision model {model or self.settings.vision_model} returned an empty response.")
         return content.strip()
 
-    def warm_up(self, model: str | None = None) -> float:
+    def warm_up(
+        self,
+        model: str | None = None,
+        *,
+        max_tokens_override: int | None = None,
+        context_size_override: int | None = None,
+        temperature_override: float | None = None,
+    ) -> float:
         warm_model = model or self.settings.model
         payload = self._build_payload(
             messages=[{"role": "user", "content": "."}],
             model=warm_model,
             stream=False,
-            max_tokens_override=8,
-            context_size_override=min(self.settings.context_size, 4096),
+            max_tokens_override=max_tokens_override or 8,
+            context_size_override=context_size_override or min(self.settings.context_size, 4096),
+            temperature_override=temperature_override,
         )
         started = perf_counter()
         try:
@@ -270,11 +278,13 @@ class LLMClient:
         context_size_override: int | None = None,
         temperature_override: float | None = None,
     ) -> dict[str, object]:
+        del max_tokens_override, context_size_override
         options: dict[str, Any] = {
             "temperature": self.settings.temperature if temperature_override is None else temperature_override,
-            "num_predict": max_tokens_override or self.settings.max_tokens,
-            "num_ctx": context_size_override or self.settings.context_size,
-            "num_batch": self.settings.batch_size,
+            # These values are fixed by the runtime contract and must not drift.
+            "num_predict": FIXED_NUM_PREDICT,
+            "num_ctx": FIXED_CONTEXT_SIZE,
+            "num_batch": FIXED_BATCH_SIZE,
         }
         if self.settings.gpu_layers != 0:
             options["num_gpu"] = self.settings.gpu_layers

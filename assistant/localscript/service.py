@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from assistant.config.settings import SettingsManager
-from assistant.llm.client import LLMClient
+from assistant.llm.client import LLMClient, LLMClientError
+from assistant.localscript.runtime import build_runtime_constraints, probe_ollama_runtime
 from assistant.localscript.knowledge import LocalScriptKnowledgeBase
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.models import (
@@ -94,6 +95,7 @@ class LocalScriptService:
         assumptions: list[str] = []
         candidate_reports: list[CandidateArtifact] = []
         repair_attempts_used = 0
+        runtime_info: dict[str, Any] = {}
 
         unsupported_language = self._detect_unsupported_language(task)
         if unsupported_language is not None:
@@ -129,6 +131,7 @@ class LocalScriptService:
                 trace=trace,
                 candidate_reports=candidate_reports,
                 repair_attempts_used=repair_attempts_used,
+                runtime_info=runtime_info,
             )
 
         clarification_question = self._build_clarification_question(task, context_messages)
@@ -160,6 +163,7 @@ class LocalScriptService:
                 trace=trace,
                 candidate_reports=candidate_reports,
                 repair_attempts_used=repair_attempts_used,
+                runtime_info=runtime_info,
             )
 
         if clarification_question:
@@ -169,6 +173,27 @@ class LocalScriptService:
                 trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
 
         settings = self.settings_manager.get_settings()
+        if interaction_mode == "judged" and settings.localscript_runtime_guard:
+            runtime_info = self._ensure_judged_runtime(settings)
+            logs.append(
+                ActionLogEntry(
+                    message=(
+                        "Judged runtime guard passed: "
+                        f"model={settings.localscript_model}, "
+                        f"warm_up={runtime_info.get('warm_up_seconds', 0.0)}s"
+                    )
+                )
+            )
+            trace.append(
+                GenerationTraceEntry(
+                    stage="runtime_guard",
+                    status="passed",
+                    detail=(
+                        f"model={settings.localscript_model}, "
+                        f"loaded_models={runtime_info.get('loaded_models_count', 0)}"
+                    ),
+                )
+            )
         feedback_hints = self._feedback_hints()
         candidates: list[_Candidate] = []
         labels = self._candidate_labels(task, settings.localscript_candidate_count)
@@ -283,6 +308,7 @@ class LocalScriptService:
             trace=trace,
             candidate_reports=candidate_reports,
             repair_attempts_used=repair_attempts_used,
+            runtime_info=runtime_info,
         )
 
     def _build_candidate(
@@ -370,7 +396,7 @@ class LocalScriptService:
         )
         return self.llm_client.chat(
             messages,
-            model=settings.model,
+            model=settings.localscript_model,
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
@@ -426,7 +452,7 @@ class LocalScriptService:
         ]
         return self.llm_client.chat(
             messages,
-            model=settings.model,
+            model=settings.localscript_model,
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
@@ -528,6 +554,35 @@ class LocalScriptService:
             "3. Verify edge cases such as nil, empty arrays, and missing fields.\n"
             "4. If a defect is found, rebuild the code and return only the corrected final version."
         )
+
+    def _ensure_judged_runtime(self, settings) -> dict[str, Any]:
+        warm_up_seconds = self.llm_client.warm_up(
+            settings.localscript_model,
+            max_tokens_override=8,
+            context_size_override=settings.localscript_context_size,
+            temperature_override=settings.localscript_temperature,
+        )
+        runtime = probe_ollama_runtime(settings)
+        constraints = build_runtime_constraints(settings, runtime)
+        failures = [name for name, passed, _ in constraints if not passed]
+        runtime_info = {
+            "model": settings.localscript_model,
+            "warm_up_seconds": round(warm_up_seconds, 3),
+            "loaded_models_count": len(runtime.loaded_models),
+            "constraints": [
+                {"name": name, "passed": passed, "detail": detail}
+                for name, passed, detail in constraints
+            ],
+            "probe": runtime.to_dict(),
+        }
+        if failures:
+            details = ", ".join(
+                f"{name}={detail}"
+                for name, passed, detail in constraints
+                if not passed
+            )
+            raise LLMClientError(f"Judged runtime guard failed: {details}")
+        return runtime_info
 
     def _select_best_candidate(self, candidates: Sequence[_Candidate]) -> _Candidate:
         return max(
