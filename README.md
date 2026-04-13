@@ -21,6 +21,7 @@ Judged path:
   - only one Ollama model may stay loaded in the contest contour
 
 The judged contour is validated at runtime through `assistant/localscript/runtime.py` and `assistant/localscript/self_check.py`.
+LocalScript-profile defaults now enforce the runtime guard in judged mode even outside docker-compose.
 
 
 ## Quick start
@@ -78,6 +79,7 @@ Important compose properties:
 - `ASSISTANT_LOCALSCRIPT_REQUIRE_FULL_GPU=true`
 - `ASSISTANT_LOCALSCRIPT_FULL_GPU_RATIO=0.98`
 - `ASSISTANT_LOCALSCRIPT_MAX_VRAM_BYTES=8000000000`
+- local syntax gate available through `luac` or bundled `luaparser`
 
 Reference env file:
 
@@ -104,8 +106,19 @@ curl -X POST http://127.0.0.1:8080/generate ^
 The response contains:
 
 - `code`
+- `clarification_question`
+- `metrics`
 
 If judged runtime constraints are violated, the API returns `503`.
+
+Iterative refinement is available through the same endpoint by passing `context_messages` and `allow_clarification=true`.
+Example:
+
+```bash
+curl -X POST http://127.0.0.1:8080/generate ^
+  -H "Content-Type: application/json" ^
+  -d "{\"prompt\":\"Refine the previous result for JSON payload output.\",\"allow_clarification\":true,\"context_messages\":[{\"role\":\"assistant\",\"content\":\"return wf.vars.orderId\"},{\"role\":\"user\",\"content\":\"Return JSON payload with orderId only.\"}]}"
+```
 
 ## Self-check
 
@@ -129,9 +142,11 @@ The self-check verifies:
 - judged runtime guard enabled
 - full GPU requirement enabled
 - live Ollama runtime probe via `/api/version` and `/api/ps`
+- local syntax gate availability (`luac` or `luaparser`)
 - model digest presence
 - VRAM budget
 - knowledge/eval exact-overlap audit
+- semantic overlap audit between public guidance cards and eval prompts
 - smoke eval path
 
 ## Eval
@@ -160,8 +175,24 @@ The report now includes:
 - model and judged settings
 - strategy distribution
 - `luac` status distribution
+- syntax-engine distribution
 - runtime-info presence
 - exact prompt-overlap audit between public knowledge examples and public eval cases
+- semantic overlap audit between public guidance cards and eval prompts
+
+## Live E2E
+
+Reproducible live contour:
+
+```bash
+python -m assistant.localscript.e2e --suite smoke --json-out artifacts/localscript_e2e_report.json
+```
+
+Extended live contour:
+
+```bash
+python -m assistant.localscript.e2e --suite full --json-out artifacts/localscript_e2e_report.json
+```
 
 ## Local knowledge base
 

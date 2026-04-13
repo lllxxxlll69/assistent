@@ -14,7 +14,14 @@ from typing import Any
 from assistant.app import build_backend
 from assistant.config.settings import SettingsManager
 from assistant.localscript.eval_cases import EvalCase, get_eval_cases
-from assistant.localscript.knowledge import find_exact_prompt_overlaps
+from assistant.localscript.knowledge import find_exact_prompt_overlaps, find_semantic_prompt_overlaps
+from assistant.localscript.semantic_checks import (
+    code_handles_timezone_offset,
+    looks_like_iso8601_builder,
+    parse_json_payload,
+    task_requires_timezone_aware_unix,
+    verify_json_payload_shape,
+)
 from assistant.models import Message
 
 
@@ -80,8 +87,106 @@ def _property_check(name: str, case: EvalCase, response_text: str, metrics: dict
     if name == "iso_8601_pattern":
         passed = "string.format" in response_text and "DATUM" in response_text and "TIME" in response_text
         return PropertyCheckResult(name=name, passed=passed, detail="ISO 8601 pattern detected" if passed else "ISO 8601 pattern missing")
+    if name == "semantic_case_match":
+        return _semantic_case_match(case, response_text, metrics)
 
     return PropertyCheckResult(name=name, passed=False, detail="Unknown property check.")
+
+
+def _semantic_case_match(case: EvalCase, response_text: str, metrics: dict[str, Any]) -> PropertyCheckResult:
+    del metrics
+    stripped = response_text.strip()
+    if case.category == "selection_last":
+        expected_path = next((item for item in case.required_substrings if item.startswith("wf.")), "")
+        passed = bool(expected_path) and expected_path in response_text and "#" in response_text
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="last-element semantics matched" if passed else "last-element semantics missing",
+        )
+    if case.category == "increment":
+        expected_path = next((item for item in case.required_substrings if item.startswith("wf.")), "")
+        passed = bool(expected_path) and expected_path in response_text and "+ 1" in response_text
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="increment semantics matched" if passed else "increment semantics missing",
+        )
+    if case.category == "direct_return":
+        expected_return = next(iter(case.required_substrings), "")
+        passed = expected_return in response_text
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="direct return matched" if passed else "direct return missing",
+        )
+    if case.category == "json_payload":
+        payload_check = verify_json_payload_shape(case.prompt, stripped)
+        payload = parse_json_payload(stripped) or {}
+        wrappers_ok = payload_check.ok and all(
+            isinstance(value, str) and value.startswith("lua{") and value.endswith("}lua")
+            for value in payload.values()
+        )
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=wrappers_ok,
+            detail=payload_check.detail if not wrappers_ok else "JSON payload fields and wrappers matched",
+        )
+    if case.category == "datetime_iso":
+        passed = looks_like_iso8601_builder(response_text)
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="ISO 8601 shape matched" if passed else "ISO 8601 shape missing or malformed",
+        )
+    if case.category == "datetime_unix":
+        passed = "os.time" in response_text and (
+            not task_requires_timezone_aware_unix(case.prompt) or code_handles_timezone_offset(response_text)
+        )
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="unix timestamp semantics matched" if passed else "timezone-aware unix conversion missing",
+        )
+    if case.category == "rest_cleanup":
+        passed = "wf.vars.RESTbody.result" in response_text and (
+            "filtered_entry[key] = nil" in response_text or "key ~= \"ID\"" in response_text
+        )
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="REST cleanup semantics matched" if passed else "REST cleanup semantics missing",
+        )
+    if case.category == "array_filter":
+        passed = all(marker in response_text for marker in ("_utils.array.new()", "wf.vars.parsedCsv", "table.insert"))
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="array filter semantics matched" if passed else "array filter semantics missing",
+        )
+    if case.category == "array_helpers":
+        passed = "_utils.array.markAsArray" in response_text and any(
+            marker in response_text for marker in ("obj.items", "wf.vars.items", "wf.initVariables.packages", "ZCDF_PACKAGES")
+        )
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail="array helper semantics matched" if passed else "array helper semantics missing",
+        )
+    if case.category == "assumptions":
+        payload_check = verify_json_payload_shape(case.prompt, stripped)
+        payload = parse_json_payload(stripped) or {}
+        wrappers_ok = payload_check.ok and all(
+            isinstance(value, str) and value.startswith("lua{") and value.endswith("}lua")
+            for value in payload.values()
+        )
+        passed = wrappers_ok and '"squared"' in stripped
+        return PropertyCheckResult(
+            name="semantic_case_match",
+            passed=passed,
+            detail=payload_check.detail if not passed else "judged assumption payload matched",
+        )
+    return PropertyCheckResult(name="semantic_case_match", passed=True, detail="No extra semantic check for this category.")
 
 
 async def run_eval_suite(
@@ -91,13 +196,13 @@ async def run_eval_suite(
 ) -> dict[str, Any]:
     cases = get_eval_cases(smoke_only=smoke_only)
     overlap_report = find_exact_prompt_overlaps([(case.id, case.prompt) for case in cases])
+    semantic_overlap_report = find_semantic_prompt_overlaps([(case.id, case.prompt) for case in cases])
     with tempfile.TemporaryDirectory() as tmp_dir:
         temp_root = Path(tmp_dir)
         settings_manager = SettingsManager(temp_root / "settings.json")
         if smoke_only:
             settings_manager.update_settings(
                 localscript_candidate_count=1,
-                localscript_repair_attempts=0,
             )
         backend = build_backend(settings_manager=settings_manager, history_path=temp_root / "history.json")
         settings = settings_manager.get_settings()
@@ -106,6 +211,7 @@ async def run_eval_suite(
         by_category_totals: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "total": 0})
         by_strategy = Counter[str]()
         by_luac_status = Counter[str]()
+        by_syntax_engine = Counter[str]()
         runtime_guard_results = Counter[str]()
         repair_attempts: list[int] = []
         assumption_counts: list[int] = []
@@ -124,7 +230,10 @@ async def run_eval_suite(
 
             required_results = {item: (item in response.text) for item in case.required_substrings}
             forbidden_results = {item: (item not in response.text) for item in case.forbidden_patterns}
-            property_results = [_property_check(name, case, response.text, response.metrics) for name in case.property_checks]
+            property_checks = list(case.property_checks)
+            if "semantic_case_match" not in property_checks:
+                property_checks.append("semantic_case_match")
+            property_results = [_property_check(name, case, response.text, response.metrics) for name in property_checks]
 
             case_failures: list[str] = []
             for name, passed in required_results.items():
@@ -161,6 +270,7 @@ async def run_eval_suite(
                 by_category_totals[case.category]["passed"] += 1
             by_strategy.update([result.selected_strategy or "unknown"])
             by_luac_status.update([str(response.metrics.get("luac_status", "unknown"))])
+            by_syntax_engine.update([str(response.metrics.get("syntax_engine", "unknown"))])
             runtime_info = response.metrics.get("runtime_info")
             if isinstance(runtime_info, dict) and runtime_info:
                 runtime_guard_results.update(["present"])
@@ -177,7 +287,8 @@ async def run_eval_suite(
             "report_generated_at": datetime.now(timezone.utc).isoformat(),
             "report_schema_version": 2,
             "suite": "smoke" if smoke_only else "full",
-            "model": settings.model,
+            "model": settings.localscript_model,
+            "chat_model": settings.model,
             "localscript_model": settings.localscript_model,
             "localscript_runtime_guard": settings.localscript_runtime_guard,
             "localscript_require_full_gpu": settings.localscript_require_full_gpu,
@@ -187,11 +298,14 @@ async def run_eval_suite(
             "cases_passed": passed,
             "pass_rate": round((passed / total) * 100, 2) if total else 0.0,
             "luac_status_distribution": dict(by_luac_status),
+            "syntax_engine_distribution": dict(by_syntax_engine),
             "selected_strategy_distribution": dict(by_strategy),
             "runtime_guard_distribution": dict(runtime_guard_results),
             "knowledge_eval_overlap": {
                 "exact_overlap_count": len(overlap_report),
                 "exact_overlaps": overlap_report,
+                "semantic_overlap_count": len(semantic_overlap_report),
+                "semantic_overlaps": semantic_overlap_report,
             },
             "failure_reasons": dict(failure_reasons),
             "avg_repair_attempts_used": round(mean(repair_attempts), 3) if repair_attempts else 0.0,

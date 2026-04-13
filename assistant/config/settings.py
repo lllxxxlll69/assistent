@@ -51,7 +51,7 @@ class Settings:
     localscript_auto_validate: bool = True
     localscript_repair_attempts: int = 2
     localscript_candidate_count: int = 3
-    localscript_runtime_guard: bool = False
+    localscript_runtime_guard: bool = True
     localscript_require_full_gpu: bool = True
     localscript_full_gpu_ratio: float = 0.98
     localscript_max_vram_bytes: int = 8_000_000_000
@@ -200,6 +200,7 @@ def enforce_fixed_runtime_limits(settings: Settings) -> Settings:
             "batch_size": FIXED_BATCH_SIZE,
             "localscript_context_size": FIXED_CONTEXT_SIZE,
             "localscript_num_predict": FIXED_NUM_PREDICT,
+            "localscript_runtime_guard": True,
         }
     )
     return Settings(**constrained)

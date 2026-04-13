@@ -12,8 +12,9 @@ from assistant.config.settings import FIXED_BATCH_SIZE, FIXED_CONTEXT_SIZE, FIXE
 from assistant.llm.client import LLMClientError
 from assistant.localscript.eval_cases import get_eval_cases
 from assistant.localscript.evaluator import run_eval_suite
-from assistant.localscript.knowledge import find_exact_prompt_overlaps
+from assistant.localscript.knowledge import find_exact_prompt_overlaps, find_semantic_prompt_overlaps
 from assistant.localscript.runtime import RuntimeProbeError, build_runtime_constraints, probe_ollama_runtime
+from assistant.localscript.syntax_gate import probe_syntax_gate
 
 
 @dataclass(slots=True)
@@ -41,6 +42,7 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
     docker_compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
     dockerfile_text = Path("Dockerfile").read_text(encoding="utf-8")
     overlap_report = find_exact_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)])
+    semantic_overlap_report = find_semantic_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)])
 
     checks: list[CheckResult] = [
         CheckResult(
@@ -133,7 +135,22 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             status=_status(not overlap_report),
             detail=f"exact_overlap_count={len(overlap_report)}",
         ),
+        CheckResult(
+            name="knowledge_eval_semantic_overlap",
+            status=_status(not semantic_overlap_report),
+            detail=f"semantic_overlap_count={len(semantic_overlap_report)}",
+            required=False,
+        ),
     ]
+
+    syntax_probe = probe_syntax_gate()
+    checks.append(
+        CheckResult(
+            name="syntax_gate_available",
+            status="passed",
+            detail=f"{syntax_probe.engine}: {syntax_probe.detail}",
+        )
+    )
 
     luac_path = shutil.which("luac")
     checks.append(
@@ -235,6 +252,8 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
         "knowledge_eval_overlap": {
             "exact_overlap_count": len(overlap_report),
             "exact_overlaps": overlap_report,
+            "semantic_overlap_count": len(semantic_overlap_report),
+            "semantic_overlaps": semantic_overlap_report,
         },
         "smoke_report": smoke_report,
         "full_report": full_report,

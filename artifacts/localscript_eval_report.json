@@ -1,47 +1,53 @@
 {
-  "report_generated_at": "2026-04-13T14:03:02.122324+00:00",
+  "report_generated_at": "2026-04-13T21:35:27.719968+00:00",
   "report_schema_version": 2,
   "suite": "full",
   "model": "qwen2.5-coder:7b",
+  "chat_model": "qwen2.5-coder:7b",
   "localscript_model": "qwen2.5-coder:7b",
-  "localscript_runtime_guard": false,
-  "localscript_require_full_gpu": true,
+  "localscript_runtime_guard": true,
+  "localscript_require_full_gpu": false,
   "localscript_context_size": 4096,
   "localscript_num_predict": 256,
   "cases_total": 31,
-  "cases_passed": 25,
-  "pass_rate": 80.65,
+  "cases_passed": 23,
+  "pass_rate": 74.19,
   "luac_status_distribution": {
-    "skipped_with_reason": 31
+    "passed": 31
+  },
+  "syntax_engine_distribution": {
+    "luaparser": 31
   },
   "selected_strategy_distribution": {
-    "baseline": 24,
-    "strict": 2,
-    "domain_strict": 1,
-    "baseline_repair_2": 1,
-    "json_payload_repair_1": 1,
-    "baseline_repair_1": 2
+    "symbolic": 16,
+    "strict": 3,
+    "baseline": 8,
+    "baseline_repair_1": 3,
+    "return_first": 1
   },
   "runtime_guard_distribution": {
-    "absent": 31
+    "present": 31
   },
   "knowledge_eval_overlap": {
     "exact_overlap_count": 0,
-    "exact_overlaps": []
+    "exact_overlaps": [],
+    "semantic_overlap_count": 0,
+    "semantic_overlaps": []
   },
   "failure_reasons": {
-    "missing_required:_utils.array.new()": 2,
-    "missing_required:_utils.array.markAsArray": 2,
-    "property_failed:uses_array_helper_new": 2,
-    "property_failed:uses_mark_as_array": 2,
+    "missing_required:filtered_entry[key] = nil": 2,
+    "property_failed:validation_passed": 2,
+    "property_failed:rest_cleanup_pattern": 1,
+    "property_failed:semantic_case_match": 4,
+    "missing_required:obj.items": 1,
+    "missing_required:_utils.array.new()": 1,
+    "property_failed:uses_array_helper_new": 1,
     "missing_required:\"num\":\"lua{": 1,
     "missing_required:\"squared\":\"lua{": 2,
-    "property_failed:validation_passed": 3,
-    "missing_required:\"orderId\":\"lua{": 1,
-    "missing_required:\"customerEmail\":\"lua{": 1,
-    "property_failed:json_payload_wrapped": 1
+    "property_failed:json_payload_wrapped": 1,
+    "missing_required:return wf.vars.json.order.id": 1
   },
-  "avg_repair_attempts_used": 0.419,
+  "avg_repair_attempts_used": 0.387,
   "avg_assumptions_used": 0.194,
   "categories": {
     "array_filter": {
@@ -70,9 +76,9 @@
       "pass_rate": 100.0
     },
     "direct_return": {
-      "passed": 4,
+      "passed": 3,
       "total": 4,
-      "pass_rate": 100.0
+      "pass_rate": 75.0
     },
     "increment": {
       "passed": 4,
@@ -80,14 +86,14 @@
       "pass_rate": 100.0
     },
     "json_payload": {
-      "passed": 0,
+      "passed": 2,
       "total": 3,
-      "pass_rate": 0.0
+      "pass_rate": 66.67
     },
     "rest_cleanup": {
-      "passed": 4,
+      "passed": 1,
       "total": 4,
-      "pass_rate": 100.0
+      "pass_rate": 25.0
     },
     "selection_last": {
       "passed": 4,
@@ -101,29 +107,88 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.emails[#wf.vars.emails]",
       "metrics": {
         "request_count": 1,
         "estimated_tokens": 9,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -150,6 +215,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "last-element semantics matched"
         }
       ],
       "required_substring_results": {
@@ -169,29 +239,88 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.phones[#wf.vars.phones]",
       "metrics": {
         "request_count": 2,
         "estimated_tokens": 9,
-        "validation_checks": 20,
+        "validation_checks": 21,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -208,6 +337,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "last-element semantics matched"
         }
       ],
       "required_substring_results": {
@@ -227,29 +361,88 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.tokens[#wf.vars.tokens]",
       "metrics": {
         "request_count": 3,
         "estimated_tokens": 9,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -266,6 +459,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "last-element semantics matched"
         }
       ],
       "required_substring_results": {
@@ -285,29 +483,88 @@
       "category": "selection_last",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.initVariables.orders[#wf.initVariables.orders]",
       "metrics": {
         "request_count": 4,
         "estimated_tokens": 14,
-        "validation_checks": 20,
+        "validation_checks": 21,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -324,6 +581,11 @@
           "name": "uses_init_variables",
           "passed": true,
           "detail": "wf.initVariables used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "last-element semantics matched"
         }
       ],
       "required_substring_results": {
@@ -343,29 +605,88 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.try_count_n + 1",
       "metrics": {
         "request_count": 5,
         "estimated_tokens": 7,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -382,6 +703,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "increment semantics matched"
         }
       ],
       "required_substring_results": {
@@ -401,29 +727,88 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.retryCounter + 1",
       "metrics": {
         "request_count": 6,
         "estimated_tokens": 7,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -440,6 +825,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "increment semantics matched"
         }
       ],
       "required_substring_results": {
@@ -459,29 +849,88 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.errorCount + 1",
       "metrics": {
         "request_count": 7,
         "estimated_tokens": 7,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -498,6 +947,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "increment semantics matched"
         }
       ],
       "required_substring_results": {
@@ -517,29 +971,88 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.attempts + 1",
       "metrics": {
         "request_count": 8,
         "estimated_tokens": 6,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -556,6 +1069,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "increment semantics matched"
         }
       ],
       "required_substring_results": {
@@ -575,19 +1093,21 @@
       "category": "rest_cleanup",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "baseline",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "selected_strategy": "strict",
+      "response": "local result = wf.vars.RESTbody.result\nfor i, entry in ipairs(result) do\n    for key in pairs(entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 9,
-        "estimated_tokens": 67,
-        "validation_checks": 18,
+        "estimated_tokens": 59,
+        "validation_checks": 19,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "strict",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -597,7 +1117,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -614,6 +1194,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "REST cleanup semantics matched"
         }
       ],
       "required_substring_results": {
@@ -633,20 +1218,22 @@
       "case_id": "rest_cleanup_variant",
       "category": "rest_cleanup",
       "difficulty": "medium",
-      "ok": true,
+      "ok": false,
       "selected_strategy": "baseline",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "response": "local result = wf.vars.RESTbody.result\nfor i = #result, 1, -1 do\n    local entry = result[i]\n    for key in pairs(entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 10,
-        "estimated_tokens": 67,
-        "validation_checks": 18,
+        "estimated_tokens": 64,
+        "validation_checks": 19,
         "validation_errors": 0,
         "candidate_count": 3,
         "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -656,7 +1243,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -673,64 +1320,144 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "REST cleanup semantics matched"
         }
       ],
       "required_substring_results": {
         "wf.vars.RESTbody.result": true,
-        "filtered_entry[key] = nil": true
+        "filtered_entry[key] = nil": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:filtered_entry[key] = nil"
+      ],
       "notes": ""
     },
     {
       "case_id": "rest_cleanup_english",
       "category": "rest_cleanup",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "baseline",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "ok": false,
+      "selected_strategy": "baseline_repair_1",
+      "response": "local result = {}\nfor _, entry in ipairs(wf.vars.RESTbody.result) do\n    local filteredEntry = {\n        ID = entry.ID,\n        ENTITY_ID = entry.ENTITY_ID,\n        CALL = entry.CALL\n    }\n    table.insert(result, filteredEntry)\nend\nreturn result",
       "metrics": {
         "request_count": 11,
-        "estimated_tokens": 67,
+        "estimated_tokens": 61,
         "validation_checks": 18,
-        "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 0,
+        "validation_errors": 1,
+        "candidate_count": 7,
+        "selected_strategy": "baseline_repair_1",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
+        "repair_attempts_used": 4,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
-          "final_selected:passed"
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "validation_failed:failed",
+          "final_selected:failed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "llm": 3,
+          "repair": 4
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": true,
-          "detail": "validation_errors=0"
+          "passed": false,
+          "detail": "validation_errors=1"
         },
         {
           "name": "rest_cleanup_pattern",
-          "passed": true,
-          "detail": "REST cleanup pattern detected"
+          "passed": false,
+          "detail": "REST cleanup pattern missing"
         },
         {
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": false,
+          "detail": "REST cleanup semantics missing"
         }
       ],
       "required_substring_results": {
@@ -743,27 +1470,33 @@
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "property_failed:validation_passed",
+        "property_failed:rest_cleanup_pattern",
+        "property_failed:semantic_case_match"
+      ],
       "notes": ""
     },
     {
       "case_id": "rest_cleanup_call_field",
       "category": "rest_cleanup",
       "difficulty": "medium",
-      "ok": true,
+      "ok": false,
       "selected_strategy": "baseline",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "response": "local result = wf.vars.RESTbody.result\nfor i, entry in ipairs(result) do\n    for key in pairs(entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 12,
-        "estimated_tokens": 67,
-        "validation_checks": 18,
+        "estimated_tokens": 59,
+        "validation_checks": 19,
         "validation_errors": 0,
         "candidate_count": 3,
         "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -773,7 +1506,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -790,18 +1583,25 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "REST cleanup semantics matched"
         }
       ],
       "required_substring_results": {
         "wf.vars.RESTbody.result": true,
-        "filtered_entry[key] = nil": true
+        "filtered_entry[key] = nil": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:filtered_entry[key] = nil"
+      ],
       "notes": ""
     },
     {
@@ -809,19 +1609,21 @@
       "category": "datetime_iso",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "baseline",
-      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\n\nfunction safe_sub(str, start_pos, end_pos)\n    local value = string.sub(str, start_pos, math.min(end_pos, #str))\n    return value ~= \"\" and value or \"00\"\nend\n\nlocal year = safe_sub(datum, 1, 4)\nlocal month = safe_sub(datum, 5, 6)\nlocal day = safe_sub(datum, 7, 8)\nlocal hour = safe_sub(time, 1, 2)\nlocal minute = safe_sub(time, 3, 4)\nlocal second = safe_sub(time, 5, 6)\n\nreturn string.format('%s-%s-%sT%s:%s:%s.000Z', year, month, day, hour, minute, second)",
+      "selected_strategy": "return_first",
+      "response": "local function formatISO8601(datum, time)\n    local year = datum:sub(1, 4)\n    local month = datum:sub(5, 6)\n    local day = datum:sub(7, 8)\n    local hour = time:sub(1, 2)\n    local minute = time:sub(3, 4)\n    local second = time:sub(5, 6)\n\n    return string.format(\"%s-%s-%sT%s:%s:%sZ\", year, month, day, hour, minute, second)\nend\n\nreturn formatISO8601(wf.vars.DATUM, wf.vars.TIME)",
       "metrics": {
         "request_count": 13,
-        "estimated_tokens": 138,
-        "validation_checks": 15,
+        "estimated_tokens": 95,
+        "validation_checks": 17,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "return_first",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -831,7 +1633,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -848,6 +1710,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "ISO 8601 shape matched"
         }
       ],
       "required_substring_results": {
@@ -868,19 +1735,21 @@
       "category": "datetime_iso",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "strict",
-      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\n\nreturn string.format('%s-%s-%sT%s:%s:%sZ', datum:sub(1, 4), datum:sub(5, 6), datum:sub(7, 8), time:sub(1, 2), time:sub(3, 4), time:sub(5, 6))",
+      "selected_strategy": "baseline",
+      "response": "local DATUM = wf.vars.DATUM\nlocal TIME = wf.vars.TIME\n\nlocal year = DATUM:sub(1, 4)\nlocal month = DATUM:sub(5, 6)\nlocal day = DATUM:sub(7, 8)\nlocal hour = TIME:sub(1, 2)\nlocal minute = TIME:sub(3, 4)\nlocal second = TIME:sub(5, 6)\n\nreturn string.format(\"%s-%s-%sT%s:%s:%sZ\", year, month, day, hour, minute, second)",
       "metrics": {
         "request_count": 14,
-        "estimated_tokens": 59,
-        "validation_checks": 15,
+        "estimated_tokens": 78,
+        "validation_checks": 17,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "strict",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "baseline",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -890,7 +1759,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -907,6 +1836,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "ISO 8601 shape matched"
         }
       ],
       "required_substring_results": {
@@ -927,19 +1861,21 @@
       "category": "array_helpers",
       "difficulty": "medium",
       "ok": false,
-      "selected_strategy": "baseline",
-      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        return {value}\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    return is_array and value or {value}\nend\n\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items then\n        obj.items = ensure_array(obj.items)\n    end\nend\n\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
+      "selected_strategy": "strict",
+      "response": "local packages = wf.vars.ZCDF_PACKAGES\n\nfor i, package in ipairs(packages) do\n    if type(package.items) ~= \"table\" then\n        wf.vars.ZCDF_PACKAGES[i].items = _utils.array.new()\n    end\n    _utils.array.markAsArray(wf.vars.ZCDF_PACKAGES[i].items)\nend\n\nreturn wf.vars.ZCDF_PACKAGES",
       "metrics": {
         "request_count": 15,
-        "estimated_tokens": 139,
-        "validation_checks": 16,
+        "estimated_tokens": 70,
+        "validation_checks": 17,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "strict",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -949,7 +1885,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -959,24 +1955,29 @@
         },
         {
           "name": "uses_array_helper_new",
-          "passed": false,
-          "detail": "array helper missing"
+          "passed": true,
+          "detail": "_utils.array.new() used"
         },
         {
           "name": "uses_mark_as_array",
-          "passed": false,
-          "detail": "markAsArray missing"
+          "passed": true,
+          "detail": "markAsArray used"
         },
         {
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array helper semantics matched"
         }
       ],
       "required_substring_results": {
-        "_utils.array.new()": false,
-        "_utils.array.markAsArray": false,
-        "obj.items": true
+        "_utils.array.new()": true,
+        "_utils.array.markAsArray": true,
+        "obj.items": false
       },
       "forbidden_pattern_results": {
         "```": true,
@@ -984,10 +1985,7 @@
         "$[": true
       },
       "failure_reasons": [
-        "missing_required:_utils.array.new()",
-        "missing_required:_utils.array.markAsArray",
-        "property_failed:uses_array_helper_new",
-        "property_failed:uses_mark_as_array"
+        "missing_required:obj.items"
       ],
       "notes": ""
     },
@@ -996,19 +1994,21 @@
       "category": "array_helpers",
       "difficulty": "medium",
       "ok": false,
-      "selected_strategy": "baseline",
-      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        return {value}\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    return is_array and value or {value}\nend\n\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items then\n        obj.items = ensure_array(obj.items)\n    end\nend\n\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
+      "selected_strategy": "strict",
+      "response": "if not wf.vars.ZCDF_PACKAGES then\n    wf.vars.ZCDF_PACKAGES = {}\nend\n\nlocal function markItemsAsArray(package)\n    if package.items then\n        _utils.array.markAsArray(package.items)\n    end\n    for _, subPackage in pairs(package.packages or {}) do\n        markItemsAsArray(subPackage)\n    end\nend\n\nmarkItemsAsArray(wf.vars.ZCDF_PACKAGES)\n\nreturn wf.vars.ZCDF_PACKAGES",
       "metrics": {
         "request_count": 16,
-        "estimated_tokens": 139,
-        "validation_checks": 16,
+        "estimated_tokens": 92,
+        "validation_checks": 17,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "strict",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1018,7 +2018,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1033,18 +2093,23 @@
         },
         {
           "name": "uses_mark_as_array",
-          "passed": false,
-          "detail": "markAsArray missing"
+          "passed": true,
+          "detail": "markAsArray used"
         },
         {
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array helper semantics matched"
         }
       ],
       "required_substring_results": {
         "_utils.array.new()": false,
-        "_utils.array.markAsArray": false,
+        "_utils.array.markAsArray": true,
         "ZCDF_PACKAGES": true
       },
       "forbidden_pattern_results": {
@@ -1054,9 +2119,7 @@
       },
       "failure_reasons": [
         "missing_required:_utils.array.new()",
-        "missing_required:_utils.array.markAsArray",
-        "property_failed:uses_array_helper_new",
-        "property_failed:uses_mark_as_array"
+        "property_failed:uses_array_helper_new"
       ],
       "notes": ""
     },
@@ -1065,19 +2128,21 @@
       "category": "array_helpers",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "domain_strict",
-      "response": "local items = wf.vars.items\nif type(items) ~= \"table\" then\n    items = _utils.array.new()\nend\n_utils.array.markAsArray(items)\nreturn items",
+      "selected_strategy": "baseline",
+      "response": "local items = wf.vars.items\n_utils.array.markAsArray(items)\nreturn items",
       "metrics": {
         "request_count": 17,
-        "estimated_tokens": 34,
-        "validation_checks": 19,
+        "estimated_tokens": 18,
+        "validation_checks": 20,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "domain_strict",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "baseline",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1087,7 +2152,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1104,6 +2229,11 @@
           "name": "contains_return",
           "passed": true,
           "detail": "contains return"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array helper semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1123,19 +2253,21 @@
       "category": "array_helpers",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "strict",
+      "selected_strategy": "baseline",
       "response": "local packages = wf.initVariables.packages\nif type(packages) == \"table\" then\n    _utils.array.markAsArray(packages)\nend\nreturn packages",
       "metrics": {
         "request_count": 18,
         "estimated_tokens": 33,
-        "validation_checks": 19,
+        "validation_checks": 20,
         "validation_errors": 0,
         "candidate_count": 3,
-        "selected_strategy": "strict",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "baseline",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1145,7 +2277,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1157,6 +2349,11 @@
           "name": "uses_mark_as_array",
           "passed": true,
           "detail": "markAsArray used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array helper semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1177,18 +2374,20 @@
       "difficulty": "medium",
       "ok": true,
       "selected_strategy": "baseline",
-      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "response": "local result = _utils.array.new()\n\nfor _, row in ipairs(wf.vars.parsedCsv) do\n    if row.Discount or row.Markdown then\n        table.insert(result, row)\n    end\nend\n\nreturn result",
       "metrics": {
         "request_count": 19,
-        "estimated_tokens": 61,
-        "validation_checks": 19,
+        "estimated_tokens": 44,
+        "validation_checks": 20,
         "validation_errors": 0,
         "candidate_count": 3,
         "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1198,7 +2397,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1215,6 +2474,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array filter semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1236,18 +2500,20 @@
       "difficulty": "medium",
       "ok": true,
       "selected_strategy": "baseline",
-      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "response": "local result = _utils.array.new()\n\nfor _, row in ipairs(wf.vars.parsedCsv) do\n    if row.Discount or row.Markdown then\n        table.insert(result, row)\n    end\nend\n\nreturn result",
       "metrics": {
         "request_count": 20,
-        "estimated_tokens": 61,
-        "validation_checks": 18,
+        "estimated_tokens": 44,
+        "validation_checks": 19,
         "validation_errors": 0,
         "candidate_count": 3,
         "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1257,7 +2523,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1274,6 +2600,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array filter semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1295,18 +2626,20 @@
       "difficulty": "medium",
       "ok": true,
       "selected_strategy": "baseline",
-      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "response": "local result = _utils.array.new()\n\nfor _, row in ipairs(wf.vars.parsedCsv) do\n    if row.Discount or row.Markdown then\n        table.insert(result, row)\n    end\nend\n\nreturn result",
       "metrics": {
         "request_count": 21,
-        "estimated_tokens": 61,
-        "validation_checks": 19,
+        "estimated_tokens": 44,
+        "validation_checks": 20,
         "validation_errors": 0,
         "candidate_count": 3,
         "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1316,7 +2649,67 @@
         "strategy_distribution": {
           "llm": 3
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1333,6 +2726,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "array filter semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1353,16 +2751,17 @@
       "category": "json_payload",
       "difficulty": "medium",
       "ok": false,
-      "selected_strategy": "baseline_repair_2",
-      "response": "{\n    \"num\": \"lua{return tonumber(wf.vars.num)}lua\",\n    \"squared\": \"lua{local n = tonumber(wf.vars.num)\n                return n * n}lua\"\n}",
+      "selected_strategy": "baseline_repair_1",
+      "response": "local function calculateSquared(num)\n    return num * num\nend\n\nwf.initVariables()\nwf.vars.num = wf.vars.num or 0 -- Use workflow variable if available, default to 0\nwf.vars.squared = calculateSquared(wf.vars.num)\n\nreturn {\n    num = tostring(wf.vars.num),\n    squared = tostring(wf.vars.squared)\n}",
       "metrics": {
         "request_count": 22,
-        "estimated_tokens": 35,
-        "validation_checks": 14,
+        "estimated_tokens": 74,
+        "validation_checks": 15,
         "validation_errors": 1,
         "candidate_count": 7,
-        "selected_strategy": "baseline_repair_2",
-        "luac_status": "skipped_with_reason",
+        "selected_strategy": "baseline_repair_1",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 4,
         "assumptions": [
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля.",
@@ -1371,6 +2770,7 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
@@ -1386,7 +2786,67 @@
           "llm": 3,
           "repair": 4
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1396,8 +2856,13 @@
         },
         {
           "name": "json_payload_wrapped",
-          "passed": true,
-          "detail": "JSON payload wrapped"
+          "passed": false,
+          "detail": "JSON wrappers missing"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": false,
+          "detail": "A JSON-oriented task must return a JSON object."
         }
       ],
       "required_substring_results": {
@@ -1412,7 +2877,9 @@
       "failure_reasons": [
         "missing_required:\"num\":\"lua{",
         "missing_required:\"squared\":\"lua{",
-        "property_failed:validation_passed"
+        "property_failed:validation_passed",
+        "property_failed:json_payload_wrapped",
+        "property_failed:semantic_case_match"
       ],
       "notes": ""
     },
@@ -1420,18 +2887,19 @@
       "case_id": "square_json_payload_variant",
       "category": "json_payload",
       "difficulty": "medium",
-      "ok": false,
-      "selected_strategy": "json_payload_repair_1",
-      "response": "{\"num\":\"lua{return tonumber('12')}lua\",\"squared\":\"lua{local n = tonumber('12')\nreturn n * n}lua\"}",
+      "ok": true,
+      "selected_strategy": "symbolic",
+      "response": "{\"num\":\"lua{return tonumber('12')}lua\",\"squared\":\"lua{local n = tonumber('12'); return n * n}lua\"}",
       "metrics": {
         "request_count": 23,
         "estimated_tokens": 24,
-        "validation_checks": 14,
-        "validation_errors": 1,
-        "candidate_count": 6,
-        "selected_strategy": "json_payload_repair_1",
-        "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 3,
+        "validation_checks": 17,
+        "validation_errors": 0,
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
+        "repair_attempts_used": 0,
         "assumptions": [
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля.",
           "Если схема JSON не указана, нужно вернуть только минимальные явно запрошенные поля."
@@ -1439,32 +2907,90 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "repaired:candidate_ready",
-          "repaired:candidate_ready",
-          "repaired:candidate_ready",
-          "validation_failed:failed",
-          "final_selected:failed"
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
+          "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3,
-          "repair": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": false,
-          "detail": "validation_errors=1"
+          "passed": true,
+          "detail": "validation_errors=0"
         },
         {
           "name": "json_payload_wrapped",
           "passed": true,
           "detail": "JSON payload wrapped"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "JSON payload fields and wrappers matched"
         }
       ],
       "required_substring_results": {
@@ -1476,78 +3002,129 @@
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [
-        "property_failed:validation_passed"
-      ],
+      "failure_reasons": [],
       "notes": ""
     },
     {
       "case_id": "selected_json_fields",
       "category": "json_payload",
       "difficulty": "medium",
-      "ok": false,
-      "selected_strategy": "baseline_repair_1",
-      "response": "lua{orderId = wf.vars.orderId, customerEmail = wf.vars.customerEmail}lua",
+      "ok": true,
+      "selected_strategy": "symbolic",
+      "response": "{\"orderId\":\"lua{return wf.vars.orderId}lua\",\"customerEmail\":\"lua{return wf.vars.customerEmail}lua\"}",
       "metrics": {
         "request_count": 24,
-        "estimated_tokens": 18,
-        "validation_checks": 16,
-        "validation_errors": 1,
-        "candidate_count": 7,
-        "selected_strategy": "baseline_repair_1",
-        "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 4,
+        "estimated_tokens": 24,
+        "validation_checks": 19,
+        "validation_errors": 0,
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
+        "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "repaired:candidate_ready",
-          "repaired:candidate_ready",
-          "repaired:candidate_ready",
-          "repaired:candidate_ready",
-          "validation_failed:failed",
-          "final_selected:failed"
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
+          "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3,
-          "repair": 4
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": false,
-          "detail": "validation_errors=1"
+          "passed": true,
+          "detail": "validation_errors=0"
         },
         {
           "name": "json_payload_wrapped",
-          "passed": false,
-          "detail": "JSON wrappers missing"
+          "passed": true,
+          "detail": "JSON payload wrapped"
         },
         {
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "JSON payload fields and wrappers matched"
         }
       ],
       "required_substring_results": {
-        "\"orderId\":\"lua{": false,
-        "\"customerEmail\":\"lua{": false
+        "\"orderId\":\"lua{": true,
+        "\"customerEmail\":\"lua{": true
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [
-        "missing_required:\"orderId\":\"lua{",
-        "missing_required:\"customerEmail\":\"lua{",
-        "property_failed:validation_passed",
-        "property_failed:json_payload_wrapped"
-      ],
+      "failure_reasons": [],
       "notes": ""
     },
     {
@@ -1555,29 +3132,88 @@
       "category": "datetime_unix",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "baseline",
-      "response": "local y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)\")\nreturn os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})",
+      "selected_strategy": "symbolic",
+      "response": "local y, m, d, h, mi, s, sign, tz_h, tz_m = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)([%+%-])(%d%d):(%d%d)$\")\nif not y then\n    y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$\")\n    sign, tz_h, tz_m = \"+\", \"00\", \"00\"\nend\nlocal offset = (tonumber(tz_h) * 3600) + (tonumber(tz_m) * 60)\nlocal timestamp = os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})\nreturn sign == \"+\" and (timestamp - offset) or (timestamp + offset)",
       "metrics": {
         "request_count": 25,
-        "estimated_tokens": 61,
-        "validation_checks": 19,
+        "estimated_tokens": 149,
+        "validation_checks": 21,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1594,6 +3230,11 @@
           "name": "uses_init_variables",
           "passed": true,
           "detail": "wf.initVariables used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "unix timestamp semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1613,29 +3254,88 @@
       "category": "datetime_unix",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "baseline",
-      "response": "local y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)\")\nreturn os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})",
+      "selected_strategy": "symbolic",
+      "response": "local y, m, d, h, mi, s, sign, tz_h, tz_m = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)([%+%-])(%d%d):(%d%d)$\")\nif not y then\n    y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$\")\n    sign, tz_h, tz_m = \"+\", \"00\", \"00\"\nend\nlocal offset = (tonumber(tz_h) * 3600) + (tonumber(tz_m) * 60)\nlocal timestamp = os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})\nreturn sign == \"+\" and (timestamp - offset) or (timestamp + offset)",
       "metrics": {
         "request_count": 26,
-        "estimated_tokens": 61,
-        "validation_checks": 19,
+        "estimated_tokens": 149,
+        "validation_checks": 21,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1652,6 +3352,11 @@
           "name": "uses_init_variables",
           "passed": true,
           "detail": "wf.initVariables used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "unix timestamp semantics matched"
         }
       ],
       "required_substring_results": {
@@ -1671,29 +3376,88 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.orderId",
       "metrics": {
         "request_count": 27,
         "estimated_tokens": 5,
-        "validation_checks": 18,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1710,6 +3474,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "direct return matched"
         }
       ],
       "required_substring_results": {
@@ -1728,29 +3497,88 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.vars.customerEmail",
       "metrics": {
         "request_count": 28,
         "estimated_tokens": 7,
-        "validation_checks": 18,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1767,6 +3595,11 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "direct return matched"
         }
       ],
       "required_substring_results": {
@@ -1785,29 +3618,88 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "baseline",
+      "selected_strategy": "symbolic",
       "response": "return wf.initVariables.userId",
       "metrics": {
         "request_count": 29,
         "estimated_tokens": 7,
-        "validation_checks": 18,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1824,6 +3716,11 @@
           "name": "uses_init_variables",
           "passed": true,
           "detail": "wf.initVariables used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": true,
+          "detail": "direct return matched"
         }
       ],
       "required_substring_results": {
@@ -1841,30 +3738,89 @@
       "case_id": "return_explicit_path",
       "category": "direct_return",
       "difficulty": "easy",
-      "ok": true,
-      "selected_strategy": "baseline",
-      "response": "return wf.vars.json.order.id",
+      "ok": false,
+      "selected_strategy": "symbolic",
+      "response": "return wf.vars.json",
       "metrics": {
         "request_count": 30,
-        "estimated_tokens": 7,
-        "validation_checks": 18,
+        "estimated_tokens": 4,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 3,
-        "selected_strategy": "baseline",
-        "luac_status": "skipped_with_reason",
+        "candidate_count": 1,
+        "selected_strategy": "symbolic",
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "llm_cycle_started:running",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
-          "llm_generated:candidate_ready",
+          "runtime_guard:passed",
+          "symbolic_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "llm": 3
+          "symbolic": 1
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1881,17 +3837,25 @@
           "name": "uses_wf_vars",
           "passed": true,
           "detail": "wf.vars used"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": false,
+          "detail": "direct return missing"
         }
       ],
       "required_substring_results": {
-        "return wf.vars.json.order.id": true
+        "return wf.vars.json.order.id": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:return wf.vars.json.order.id",
+        "property_failed:semantic_case_match"
+      ],
       "notes": ""
     },
     {
@@ -1900,16 +3864,17 @@
       "difficulty": "hard",
       "ok": false,
       "selected_strategy": "baseline_repair_1",
-      "response": "{\n    \"squared\": \"lua{local n = tonumber(wf.vars.num) return n * n}lua\"\n}",
+      "response": "return {\n    squared = lua{wf.vars.number * wf.vars.number}\n}",
       "metrics": {
         "request_count": 31,
-        "estimated_tokens": 18,
-        "validation_checks": 16,
-        "validation_errors": 0,
-        "candidate_count": 5,
+        "estimated_tokens": 15,
+        "validation_checks": 15,
+        "validation_errors": 1,
+        "candidate_count": 7,
         "selected_strategy": "baseline_repair_1",
-        "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 2,
+        "luac_status": "passed",
+        "syntax_engine": "luaparser",
+        "repair_attempts_used": 4,
         "assumptions": [
           "Исходный код не предоставлен, поэтому нужен новый LocalScript-кандидат с нуля.",
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля."
@@ -1917,19 +3882,83 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
+          "runtime_guard:passed",
           "llm_cycle_started:running",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
           "llm_generated:candidate_ready",
           "repaired:candidate_ready",
           "repaired:candidate_ready",
-          "final_selected:passed"
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "validation_failed:failed",
+          "final_selected:failed"
         ],
         "strategy_distribution": {
           "llm": 3,
-          "repair": 2
+          "repair": 4
         },
-        "runtime_info": {}
+        "runtime_info": {
+          "model": "qwen2.5-coder:7b",
+          "warm_up_seconds": 2.375,
+          "loaded_models_count": 1,
+          "constraints": [
+            {
+              "name": "runtime_single_model_loaded",
+              "passed": true,
+              "detail": "loaded_models=1"
+            },
+            {
+              "name": "localscript_model_loaded",
+              "passed": true,
+              "detail": "localscript_model=qwen2.5-coder:7b"
+            },
+            {
+              "name": "runtime_context_matches",
+              "passed": true,
+              "detail": "context_length=4096"
+            },
+            {
+              "name": "runtime_vram_budget",
+              "passed": true,
+              "detail": "size_vram_bytes=3277948928"
+            },
+            {
+              "name": "runtime_gpu_only",
+              "passed": true,
+              "detail": "vram_ratio=0.6487, require_full_gpu=False"
+            },
+            {
+              "name": "runtime_digest_present",
+              "passed": true,
+              "detail": "digest=dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364"
+            }
+          ],
+          "probe": {
+            "api_root": "http://127.0.0.1:11434",
+            "version": "0.20.6",
+            "loaded_models": [
+              {
+                "name": "qwen2.5-coder:7b",
+                "model": "qwen2.5-coder:7b",
+                "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+                "size_bytes": 5053130752,
+                "size_vram_bytes": 3277948928,
+                "context_length": 4096,
+                "quantization_level": "Q4_K_M",
+                "parameter_size": "7.6B",
+                "vram_ratio": 0.648697
+              }
+            ],
+            "gpu_samples": [
+              {
+                "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+                "memory_used_mib": 2862,
+                "memory_total_mib": 4096
+              }
+            ]
+          }
+        }
       },
       "property_results": [
         {
@@ -1941,6 +3970,11 @@
           "name": "no_jsonpath",
           "passed": true,
           "detail": "JsonPath absent"
+        },
+        {
+          "name": "semantic_case_match",
+          "passed": false,
+          "detail": "A JSON-oriented task must return a JSON object."
         }
       ],
       "required_substring_results": {
@@ -1952,7 +3986,8 @@
         "$[": true
       },
       "failure_reasons": [
-        "missing_required:\"squared\":\"lua{"
+        "missing_required:\"squared\":\"lua{",
+        "property_failed:semantic_case_match"
       ],
       "notes": "Проверка judged-mode assumptions без интерактивного уточнения."
     }

@@ -4,6 +4,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from assistant.localscript.semantic_checks import summarize_overlap
+
 
 LOCALSCRIPT_RULES = """
 You are an autonomous LocalScript/Lua code generation agent for a secure LowCode runtime.
@@ -34,6 +36,7 @@ class LocalScriptExample:
     prompt: str
     expected_code: str
     keywords: tuple[str, ...]
+    shape_guidance: str = ""
 
 
 PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
@@ -45,6 +48,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
         ),
         expected_code="return wf.vars.inboxEmails[#wf.vars.inboxEmails]",
         keywords=("email", "emails", "last", "latest", "array", "wf.vars"),
+        shape_guidance=(
+            "Directly return the tail element from the workflow collection. "
+            "Prefer one return expression over loops, inserts, or sample literals."
+        ),
     ),
     LocalScriptExample(
         title="Increment attempts counter",
@@ -54,6 +61,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
         ),
         expected_code="return wf.vars.retryAttempts + 1",
         keywords=("increment", "counter", "retry", "attempts", "plus one"),
+        shape_guidance=(
+            "Read the workflow counter, increment it by one, and return the computed value. "
+            "Do not stop at assignment-only code."
+        ),
     ),
     LocalScriptExample(
         title="Keep only key REST fields",
@@ -70,6 +81,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             "return result"
         ),
         keywords=("rest", "restbody", "entity_id", "call", "filter", "cleanup"),
+        shape_guidance=(
+            "Start from wf.vars.RESTbody.result, iterate over each entry, delete every key except ID, ENTITY_ID, and CALL, "
+            "then return the filtered result."
+        ),
     ),
     LocalScriptExample(
         title="Format workflow date as ISO 8601",
@@ -90,6 +105,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             "return string.format('%s-%s-%sT%s:%s:%s.00000Z', year, month, day, hour, minute, second)"
         ),
         keywords=("iso", "8601", "datum", "time", "timestamp", "format"),
+        shape_guidance=(
+            "Read DATUM and TIME from workflow data, split them into date and time segments, "
+            "then build a canonical ISO 8601 string with separators and a trailing UTC marker."
+        ),
     ),
     LocalScriptExample(
         title="Mark package items as arrays",
@@ -116,6 +135,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             "return wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES"
         ),
         keywords=("items", "arrays", "packages", "markasarray", "zcdf_packages"),
+        shape_guidance=(
+            "Normalize nested package items so every items field is treated as an array. "
+            "Use explicit array helpers instead of inventing plain tables with ad hoc semantics."
+        ),
     ),
     LocalScriptExample(
         title="Filter parsedCsv discounts and markdowns",
@@ -131,6 +154,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             "return result"
         ),
         keywords=("discount", "markdown", "parsedcsv", "filter", "array"),
+        shape_guidance=(
+            "Create a new workflow array with only the parsedCsv rows where Discount or Markdown is present. "
+            "Use _utils.array.new() for the result and table.insert for matched rows."
+        ),
     ),
     LocalScriptExample(
         title="Return JSON payload with derived value",
@@ -140,6 +167,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             '"squared":"lua{local n = tonumber(\'5\')\nreturn n * n}lua"}'
         ),
         keywords=("json", "payload", "square", "derived", "fields"),
+        shape_guidance=(
+            "Return only the requested JSON fields. "
+            "Every executable Lua value must be wrapped as a lua{...}lua string, and derived fields should be computed inside the wrapper."
+        ),
     ),
     LocalScriptExample(
         title="Convert recallTime to unix timestamp",
@@ -152,6 +183,10 @@ PUBLIC_EXAMPLES: tuple[LocalScriptExample, ...] = (
             "return os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})"
         ),
         keywords=("recalltime", "unix", "timestamp", "initvariables", "time"),
+        shape_guidance=(
+            "Read recallTime from wf.initVariables, parse the timestamp, preserve any timezone offset, "
+            "convert to unix time with os.time, and return the final integer timestamp."
+        ),
     ),
 )
 
@@ -179,6 +214,19 @@ def find_exact_prompt_overlaps(
             }
         )
     return overlaps
+
+
+def find_semantic_prompt_overlaps(
+    cases: Sequence[tuple[str, str]],
+    examples: Sequence[LocalScriptExample] = PUBLIC_EXAMPLES,
+    *,
+    threshold: float = 0.55,
+) -> list[dict[str, str | float]]:
+    return summarize_overlap(
+        cases,
+        ((example.title, example.shape_guidance or example.prompt) for example in examples),
+        threshold=threshold,
+    )
 
 
 class LocalScriptKnowledgeBase:
@@ -212,8 +260,8 @@ class LocalScriptKnowledgeBase:
                 "\n".join(
                     [
                         f"Example {index}: {example.title}",
-                        f"User task:\n{example.prompt}",
-                        f"Expected output:\n{example.expected_code}",
+                        "Family guidance:",
+                        example.shape_guidance or "Use the public example only as abstract task-shape guidance.",
                     ]
                 )
             )
@@ -228,6 +276,7 @@ class LocalScriptKnowledgeBase:
                     [
                         f"Reference {index}: {example.title}",
                         f"Task family cues: {', '.join(example.keywords[:6])}",
+                        f"Shape guidance: {example.shape_guidance or 'abstract family card only'}",
                         "Use this only as task-shape guidance. Do not copy a canned implementation.",
                     ]
                 )

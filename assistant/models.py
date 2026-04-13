@@ -155,6 +155,7 @@ class ValidationResult:
     check_results: list[ValidationCheckResult] = field(default_factory=list)
     luac_status: str = "skipped_with_reason"
     luac_detail: str = ""
+    syntax_engine: str = ""
     score_breakdown: dict[str, int] = field(default_factory=dict)
 
 
@@ -175,6 +176,7 @@ class CandidateArtifact:
     issues: list[str] = field(default_factory=list)
     checks: list[str] = field(default_factory=list)
     luac_status: str = "skipped_with_reason"
+    syntax_engine: str = ""
     repair_round: int = 0
     score_breakdown: dict[str, int] = field(default_factory=dict)
 
