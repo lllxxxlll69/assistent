@@ -12,17 +12,21 @@ from typing import Any
 
 DEFAULT_DATA_DIR = Path(os.getenv("ASSISTANT_DATA_DIR", ".assistant_data"))
 DEFAULT_SETTINGS_PATH = DEFAULT_DATA_DIR / "settings.json"
+FIXED_CONTEXT_SIZE = 4096
+FIXED_NUM_PREDICT = 256
+FIXED_BATCH_SIZE = 1
 
 
 @dataclass(slots=True)
 class Settings:
     model: str = "qwen2.5-coder:7b"
+    localscript_model: str = "qwen2.5-coder:7b"
     vision_model: str = "qwen3-vl:4b"
     api_url: str = os.getenv("ASSISTANT_API_URL", "http://127.0.0.1:11434/api/chat")
     temperature: float = 0.2
     localscript_temperature: float = 0.0
-    max_tokens: int = 1200
-    context_size: int = 8192
+    max_tokens: int = FIXED_NUM_PREDICT
+    context_size: int = FIXED_CONTEXT_SIZE
     memory_length: int = 20
     memory_max_tokens: int = 6000
     max_search_results: int = 5
@@ -34,14 +38,24 @@ class Settings:
     request_timeout: int = 180
     stream: bool = True
     show_logs: bool = True
-    batch_size: int = 1
+    batch_size: int = FIXED_BATCH_SIZE
+    gpu_layers: int = -1
+    main_gpu: int = 0
+    cpu_threads: int = 0
+    keep_alive: str = "2h"
+    low_vram: bool = False
     assistant_profile: str = "localscript"
     agent_self_check_attempts: int = 3
-    localscript_context_size: int = 4096
-    localscript_num_predict: int = 256
+    localscript_context_size: int = FIXED_CONTEXT_SIZE
+    localscript_num_predict: int = FIXED_NUM_PREDICT
     localscript_auto_validate: bool = True
     localscript_repair_attempts: int = 2
     localscript_candidate_count: int = 3
+    localscript_runtime_guard: bool = False
+    localscript_require_full_gpu: bool = True
+    localscript_full_gpu_ratio: float = 0.98
+    localscript_max_vram_bytes: int = 8_000_000_000
+    localscript_expected_digest: str = ""
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     api_allowed_origins: str = "http://127.0.0.1,http://localhost"
@@ -62,7 +76,7 @@ class SettingsManager:
     def get_settings(self) -> Settings:
         self.ensure_storage()
         if not self.settings_path.exists():
-            settings = self._apply_env_overrides(Settings())
+            settings = enforce_fixed_runtime_limits(self._apply_env_overrides(Settings()))
             self._write(settings)
             return settings
 
@@ -76,24 +90,29 @@ class SettingsManager:
                     self.settings_path.replace(corrupt_backup)
             except OSError:
                 pass
-            settings = self._apply_env_overrides(Settings())
+            settings = enforce_fixed_runtime_limits(self._apply_env_overrides(Settings()))
             self._write(settings)
             return settings
 
         filtered_payload = {key: value for key, value in payload.items() if key in self._field_names}
-        settings = Settings(**filtered_payload)
-        return self._apply_env_overrides(settings)
+        loaded_settings = Settings(**filtered_payload)
+        normalized_settings = enforce_fixed_runtime_limits(loaded_settings)
+        if asdict(normalized_settings) != asdict(loaded_settings):
+            self._write(normalized_settings)
+        return enforce_fixed_runtime_limits(self._apply_env_overrides(normalized_settings))
 
     def update_settings(self, **updates: Any) -> Settings:
         settings = self.get_settings()
         merged = asdict(settings)
         merged.update({key: value for key, value in updates.items() if value is not None})
-        updated = Settings(**{key: value for key, value in merged.items() if key in self._field_names})
+        updated = enforce_fixed_runtime_limits(
+            Settings(**{key: value for key, value in merged.items() if key in self._field_names})
+        )
         self._write(updated)
         return updated
 
     def reset_settings(self) -> Settings:
-        settings = self._apply_env_overrides(Settings())
+        settings = enforce_fixed_runtime_limits(self._apply_env_overrides(Settings()))
         self._write(settings)
         return settings
 
@@ -109,6 +128,7 @@ class SettingsManager:
         overrides: dict[str, Any] = {}
         env_map: dict[str, tuple[str, type[Any]]] = {
             "ASSISTANT_MODEL": ("model", str),
+            "ASSISTANT_LOCALSCRIPT_MODEL": ("localscript_model", str),
             "ASSISTANT_VISION_MODEL": ("vision_model", str),
             "ASSISTANT_API_URL": ("api_url", str),
             "ASSISTANT_TEMPERATURE": ("temperature", float),
@@ -128,12 +148,19 @@ class SettingsManager:
             "ASSISTANT_MAX_REQUEST_BYTES": ("max_request_bytes", int),
             "ASSISTANT_MAX_IMAGE_SIZE_MB": ("max_image_size_mb", int),
             "ASSISTANT_BATCH_SIZE": ("batch_size", int),
+            "ASSISTANT_GPU_LAYERS": ("gpu_layers", int),
+            "ASSISTANT_MAIN_GPU": ("main_gpu", int),
+            "ASSISTANT_CPU_THREADS": ("cpu_threads", int),
+            "ASSISTANT_KEEP_ALIVE": ("keep_alive", str),
             "ASSISTANT_PROFILE": ("assistant_profile", str),
             "ASSISTANT_AGENT_SELF_CHECK_ATTEMPTS": ("agent_self_check_attempts", int),
             "ASSISTANT_LOCALSCRIPT_CONTEXT_SIZE": ("localscript_context_size", int),
             "ASSISTANT_LOCALSCRIPT_NUM_PREDICT": ("localscript_num_predict", int),
             "ASSISTANT_LOCALSCRIPT_REPAIR_ATTEMPTS": ("localscript_repair_attempts", int),
             "ASSISTANT_LOCALSCRIPT_CANDIDATE_COUNT": ("localscript_candidate_count", int),
+            "ASSISTANT_LOCALSCRIPT_FULL_GPU_RATIO": ("localscript_full_gpu_ratio", float),
+            "ASSISTANT_LOCALSCRIPT_MAX_VRAM_BYTES": ("localscript_max_vram_bytes", int),
+            "ASSISTANT_LOCALSCRIPT_EXPECTED_DIGEST": ("localscript_expected_digest", str),
         }
 
         for env_name, (field_name, caster) in env_map.items():
@@ -146,6 +173,9 @@ class SettingsManager:
             "ASSISTANT_STREAM": "stream",
             "ASSISTANT_SHOW_LOGS": "show_logs",
             "ASSISTANT_LOCALSCRIPT_AUTO_VALIDATE": "localscript_auto_validate",
+            "ASSISTANT_LOW_VRAM": "low_vram",
+            "ASSISTANT_LOCALSCRIPT_RUNTIME_GUARD": "localscript_runtime_guard",
+            "ASSISTANT_LOCALSCRIPT_REQUIRE_FULL_GPU": "localscript_require_full_gpu",
         }
         for env_name, field_name in bool_map.items():
             raw_value = os.getenv(env_name)
@@ -159,6 +189,20 @@ class SettingsManager:
         merged = asdict(settings)
         merged.update(overrides)
         return Settings(**merged)
+
+
+def enforce_fixed_runtime_limits(settings: Settings) -> Settings:
+    constrained = asdict(settings)
+    constrained.update(
+        {
+            "max_tokens": FIXED_NUM_PREDICT,
+            "context_size": FIXED_CONTEXT_SIZE,
+            "batch_size": FIXED_BATCH_SIZE,
+            "localscript_context_size": FIXED_CONTEXT_SIZE,
+            "localscript_num_predict": FIXED_NUM_PREDICT,
+        }
+    )
+    return Settings(**constrained)
 
 
 def _write_atomic_text(path: Path, content: str, *, retries: int = 8, delay_seconds: float = 0.03) -> None:

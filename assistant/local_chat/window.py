@@ -7,6 +7,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -115,7 +116,7 @@ class LocalChatWindow(QMainWindow):
 
         title = QLabel("Локальный P2P чат")
         title.setObjectName("title")
-        subtitle = QLabel("Отдельный пользовательский чат в локальной сети. Эти сообщения не попадают в ИИ.")
+        subtitle = QLabel("Отдельный пользовательский чат и обмен файлами в локальной сети. Эти данные не попадают в ИИ.")
         subtitle.setObjectName("subtitle")
 
         config_card = QFrame()
@@ -191,9 +192,11 @@ class LocalChatWindow(QMainWindow):
         self.message_edit.setPlaceholderText("Введите сообщение выбранному пиру")
         self.message_edit.setMaximumHeight(90)
         self.send_button = QPushButton("Отправить")
+        self.send_file_button = QPushButton("Файл")
         self.broadcast_button = QPushButton("Всем")
         composer_layout.addWidget(self.message_edit, 1)
         composer_layout.addWidget(self.send_button)
+        composer_layout.addWidget(self.send_file_button)
         composer_layout.addWidget(self.broadcast_button)
 
         self.log_box = QPlainTextEdit()
@@ -223,6 +226,7 @@ class LocalChatWindow(QMainWindow):
         self.discover_button.clicked.connect(self._discover)
         self.link_button.clicked.connect(self._open_manual_link_dialog)
         self.send_button.clicked.connect(self._send_message)
+        self.send_file_button.clicked.connect(self._send_file)
         self.broadcast_button.clicked.connect(self._broadcast_message)
         self.peers_list.itemSelectionChanged.connect(self._on_peer_selection_changed)
 
@@ -230,6 +234,7 @@ class LocalChatWindow(QMainWindow):
         self.discover_button.setEnabled(False)
         self.link_button.setEnabled(False)
         self.send_button.setEnabled(False)
+        self.send_file_button.setEnabled(False)
         self.broadcast_button.setEnabled(False)
 
     def _apply_styles(self) -> None:
@@ -341,6 +346,7 @@ class LocalChatWindow(QMainWindow):
         self.discover_button.setEnabled(running)
         self.link_button.setEnabled(running)
         self.send_button.setEnabled(running)
+        self.send_file_button.setEnabled(running)
         self.broadcast_button.setEnabled(running)
 
     def _poll_messenger(self) -> None:
@@ -351,7 +357,17 @@ class LocalChatWindow(QMainWindow):
             if event_type in {"status", "error"}:
                 self.status_label.setText(str(event.get("text", "")))
                 self._append_log(str(event.get("text", "")))
-            if event_type in {"peers_updated", "message_received", "message_sent", "ledger_updated"}:
+            if event_type == "file_received":
+                self._append_log(
+                    f"Получен файл {event.get('file_name', 'unknown')} "
+                    f"({event.get('file_size', 0)} bytes) -> {event.get('saved_path', '-')}"
+                )
+            if event_type == "file_sent":
+                self._append_log(
+                    f"Файл отправлен: {event.get('file_name', 'unknown')} "
+                    f"({event.get('file_size', 0)} bytes)"
+                )
+            if event_type in {"peers_updated", "message_received", "message_sent", "file_received", "file_sent", "ledger_updated"}:
                 self._refresh_peers()
                 self._refresh_history()
         if self.messenger is not None and not self.messenger.running:
@@ -394,7 +410,14 @@ class LocalChatWindow(QMainWindow):
             event = record["event"]
             direction = "Вы" if event.get("direction") == "out" else event.get("peer_name", "peer")
             timestamp = event.get("timestamp", "-")
-            text = event.get("text", "")
+            if event.get("kind") == "file":
+                text = (
+                    f"{event.get('text', '[Файл]')}\n"
+                    f"size={event.get('file_size', 0)} bytes\n"
+                    f"path={event.get('saved_path', '-')}"
+                )
+            else:
+                text = event.get("text", "")
             block = short_hash(record["block_hash"], 12)
             lines.append(f"[{timestamp}] {direction}\n{text}\nledger={block}")
         self.history_box.setPlainText("\n\n".join(lines))
@@ -465,6 +488,24 @@ class LocalChatWindow(QMainWindow):
             self._append_log(f"Ошибка broadcast: {exc}")
             return
         self.message_edit.clear()
+        self._refresh_history()
+
+    def _send_file(self) -> None:
+        if self.messenger is None:
+            return
+        if not self._selected_peer_mac:
+            QMessageBox.information(self, "Файл", "Сначала выберите пира в списке слева.")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл для отправки")
+        if not file_path:
+            return
+        try:
+            self.messenger.send_file(self._selected_peer_mac, file_path)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Файл", str(exc))
+            self._append_log(f"Ошибка отправки файла: {exc}")
+            return
+        self._append_log(f"Отправляю файл: {Path(file_path).name}")
         self._refresh_history()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]

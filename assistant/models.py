@@ -192,3 +192,4 @@ class LocalScriptGeneration:
     trace: list[GenerationTraceEntry] = field(default_factory=list)
     candidate_reports: list[CandidateArtifact] = field(default_factory=list)
     repair_attempts_used: int = 0
+    runtime_info: dict[str, Any] = field(default_factory=dict)

@@ -1,19 +1,47 @@
 {
+  "report_generated_at": "2026-04-13T14:03:02.122324+00:00",
+  "report_schema_version": 2,
   "suite": "full",
-  "model": "qwen2.5:3b",
+  "model": "qwen2.5-coder:7b",
+  "localscript_model": "qwen2.5-coder:7b",
+  "localscript_runtime_guard": false,
+  "localscript_require_full_gpu": true,
   "localscript_context_size": 4096,
   "localscript_num_predict": 256,
   "cases_total": 31,
-  "cases_passed": 31,
-  "pass_rate": 100.0,
+  "cases_passed": 25,
+  "pass_rate": 80.65,
   "luac_status_distribution": {
     "skipped_with_reason": 31
   },
   "selected_strategy_distribution": {
-    "template": 31
+    "baseline": 24,
+    "strict": 2,
+    "domain_strict": 1,
+    "baseline_repair_2": 1,
+    "json_payload_repair_1": 1,
+    "baseline_repair_1": 2
   },
-  "failure_reasons": {},
-  "avg_repair_attempts_used": 0,
+  "runtime_guard_distribution": {
+    "absent": 31
+  },
+  "knowledge_eval_overlap": {
+    "exact_overlap_count": 0,
+    "exact_overlaps": []
+  },
+  "failure_reasons": {
+    "missing_required:_utils.array.new()": 2,
+    "missing_required:_utils.array.markAsArray": 2,
+    "property_failed:uses_array_helper_new": 2,
+    "property_failed:uses_mark_as_array": 2,
+    "missing_required:\"num\":\"lua{": 1,
+    "missing_required:\"squared\":\"lua{": 2,
+    "property_failed:validation_passed": 3,
+    "missing_required:\"orderId\":\"lua{": 1,
+    "missing_required:\"customerEmail\":\"lua{": 1,
+    "property_failed:json_payload_wrapped": 1
+  },
+  "avg_repair_attempts_used": 0.419,
   "avg_assumptions_used": 0.194,
   "categories": {
     "array_filter": {
@@ -22,14 +50,14 @@
       "pass_rate": 100.0
     },
     "array_helpers": {
-      "passed": 4,
+      "passed": 2,
       "total": 4,
-      "pass_rate": 100.0
+      "pass_rate": 50.0
     },
     "assumptions": {
-      "passed": 1,
+      "passed": 0,
       "total": 1,
-      "pass_rate": 100.0
+      "pass_rate": 0.0
     },
     "datetime_iso": {
       "passed": 2,
@@ -52,9 +80,9 @@
       "pass_rate": 100.0
     },
     "json_payload": {
-      "passed": 3,
+      "passed": 0,
       "total": 3,
-      "pass_rate": 100.0
+      "pass_rate": 0.0
     },
     "rest_cleanup": {
       "passed": 4,
@@ -73,25 +101,29 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.emails[#wf.vars.emails]",
       "metrics": {
         "request_count": 1,
         "estimated_tokens": 9,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -137,25 +169,29 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.phones[#wf.vars.phones]",
       "metrics": {
         "request_count": 2,
         "estimated_tokens": 9,
-        "validation_checks": 16,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -191,25 +227,29 @@
       "category": "selection_last",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.tokens[#wf.vars.tokens]",
       "metrics": {
         "request_count": 3,
         "estimated_tokens": 9,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -245,25 +285,29 @@
       "category": "selection_last",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.initVariables.orders[#wf.initVariables.orders]",
       "metrics": {
         "request_count": 4,
         "estimated_tokens": 14,
-        "validation_checks": 16,
+        "validation_checks": 20,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -299,25 +343,29 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.try_count_n + 1",
       "metrics": {
         "request_count": 5,
         "estimated_tokens": 7,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -353,25 +401,29 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.retryCounter + 1",
       "metrics": {
         "request_count": 6,
         "estimated_tokens": 7,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -407,25 +459,29 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.errorCount + 1",
       "metrics": {
         "request_count": 7,
         "estimated_tokens": 7,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -461,25 +517,29 @@
       "category": "increment",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.attempts + 1",
       "metrics": {
         "request_count": 8,
         "estimated_tokens": 6,
-        "validation_checks": 15,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -515,25 +575,29 @@
       "category": "rest_cleanup",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in ipairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 9,
         "estimated_tokens": 67,
-        "validation_checks": 12,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -570,25 +634,29 @@
       "category": "rest_cleanup",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in ipairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 10,
         "estimated_tokens": 67,
-        "validation_checks": 12,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -624,25 +692,29 @@
       "category": "rest_cleanup",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in ipairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 11,
         "estimated_tokens": 67,
-        "validation_checks": 12,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -679,25 +751,29 @@
       "category": "rest_cleanup",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in ipairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 12,
         "estimated_tokens": 67,
-        "validation_checks": 12,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -733,25 +809,29 @@
       "category": "datetime_iso",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\nlocal function safe_sub(str, start_pos, end_pos)\n    local value = string.sub(str, start_pos, math.min(end_pos, #str))\n    return value ~= \"\" and value or \"00\"\nend\nlocal year = safe_sub(datum, 1, 4)\nlocal month = safe_sub(datum, 5, 6)\nlocal day = safe_sub(datum, 7, 8)\nlocal hour = safe_sub(time, 1, 2)\nlocal minute = safe_sub(time, 3, 4)\nlocal second = safe_sub(time, 5, 6)\nreturn string.format('%s-%s-%sT%s:%s:%s.00000Z', year, month, day, hour, minute, second)",
+      "selected_strategy": "baseline",
+      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\n\nfunction safe_sub(str, start_pos, end_pos)\n    local value = string.sub(str, start_pos, math.min(end_pos, #str))\n    return value ~= \"\" and value or \"00\"\nend\n\nlocal year = safe_sub(datum, 1, 4)\nlocal month = safe_sub(datum, 5, 6)\nlocal day = safe_sub(datum, 7, 8)\nlocal hour = safe_sub(time, 1, 2)\nlocal minute = safe_sub(time, 3, 4)\nlocal second = safe_sub(time, 5, 6)\n\nreturn string.format('%s-%s-%sT%s:%s:%s.000Z', year, month, day, hour, minute, second)",
       "metrics": {
         "request_count": 13,
-        "estimated_tokens": 139,
-        "validation_checks": 12,
+        "estimated_tokens": 138,
+        "validation_checks": 15,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -788,25 +868,29 @@
       "category": "datetime_iso",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\nlocal function safe_sub(str, start_pos, end_pos)\n    local value = string.sub(str, start_pos, math.min(end_pos, #str))\n    return value ~= \"\" and value or \"00\"\nend\nlocal year = safe_sub(datum, 1, 4)\nlocal month = safe_sub(datum, 5, 6)\nlocal day = safe_sub(datum, 7, 8)\nlocal hour = safe_sub(time, 1, 2)\nlocal minute = safe_sub(time, 3, 4)\nlocal second = safe_sub(time, 5, 6)\nreturn string.format('%s-%s-%sT%s:%s:%s.00000Z', year, month, day, hour, minute, second)",
+      "selected_strategy": "strict",
+      "response": "local datum = wf.vars.json.IDOC.ZCDF_HEAD.DATUM\nlocal time = wf.vars.json.IDOC.ZCDF_HEAD.TIME\n\nreturn string.format('%s-%s-%sT%s:%s:%sZ', datum:sub(1, 4), datum:sub(5, 6), datum:sub(7, 8), time:sub(1, 2), time:sub(3, 4), time:sub(5, 6))",
       "metrics": {
         "request_count": 14,
-        "estimated_tokens": 139,
-        "validation_checks": 12,
+        "estimated_tokens": 59,
+        "validation_checks": 15,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "strict",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -842,26 +926,30 @@
       "case_id": "ensure_items_are_arrays",
       "category": "array_helpers",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        local arr = _utils.array.new()\n        table.insert(arr, value)\n        return arr\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    if is_array then\n        return _utils.array.markAsArray(value)\n    end\n    local arr = _utils.array.new()\n    table.insert(arr, value)\n    return arr\nend\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items ~= nil then\n        obj.items = ensure_array(obj.items)\n    end\nend\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
+      "ok": false,
+      "selected_strategy": "baseline",
+      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        return {value}\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    return is_array and value or {value}\nend\n\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items then\n        obj.items = ensure_array(obj.items)\n    end\nend\n\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
       "metrics": {
         "request_count": 15,
-        "estimated_tokens": 186,
-        "validation_checks": 13,
+        "estimated_tokens": 139,
+        "validation_checks": 16,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -871,13 +959,13 @@
         },
         {
           "name": "uses_array_helper_new",
-          "passed": true,
-          "detail": "_utils.array.new() used"
+          "passed": false,
+          "detail": "array helper missing"
         },
         {
           "name": "uses_mark_as_array",
-          "passed": true,
-          "detail": "markAsArray used"
+          "passed": false,
+          "detail": "markAsArray missing"
         },
         {
           "name": "uses_wf_vars",
@@ -886,8 +974,8 @@
         }
       ],
       "required_substring_results": {
-        "_utils.array.new()": true,
-        "_utils.array.markAsArray": true,
+        "_utils.array.new()": false,
+        "_utils.array.markAsArray": false,
         "obj.items": true
       },
       "forbidden_pattern_results": {
@@ -895,33 +983,42 @@
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:_utils.array.new()",
+        "missing_required:_utils.array.markAsArray",
+        "property_failed:uses_array_helper_new",
+        "property_failed:uses_mark_as_array"
+      ],
       "notes": ""
     },
     {
       "case_id": "ensure_items_arrays_variant",
       "category": "array_helpers",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        local arr = _utils.array.new()\n        table.insert(arr, value)\n        return arr\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    if is_array then\n        return _utils.array.markAsArray(value)\n    end\n    local arr = _utils.array.new()\n    table.insert(arr, value)\n    return arr\nend\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items ~= nil then\n        obj.items = ensure_array(obj.items)\n    end\nend\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
+      "ok": false,
+      "selected_strategy": "baseline",
+      "response": "local function ensure_array(value)\n    if type(value) ~= \"table\" then\n        return {value}\n    end\n    local is_array = true\n    for key, _ in pairs(value) do\n        if type(key) ~= \"number\" or math.floor(key) ~= key then\n            is_array = false\n            break\n        end\n    end\n    return is_array and value or {value}\nend\n\nfor _, obj in ipairs(wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES) do\n    if type(obj) == \"table\" and obj.items then\n        obj.items = ensure_array(obj.items)\n    end\nend\n\nreturn wf.vars.json.IDOC.ZCDF_HEAD.ZCDF_PACKAGES",
       "metrics": {
         "request_count": 16,
-        "estimated_tokens": 186,
-        "validation_checks": 13,
+        "estimated_tokens": 139,
+        "validation_checks": 16,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -931,13 +1028,13 @@
         },
         {
           "name": "uses_array_helper_new",
-          "passed": true,
-          "detail": "_utils.array.new() used"
+          "passed": false,
+          "detail": "array helper missing"
         },
         {
           "name": "uses_mark_as_array",
-          "passed": true,
-          "detail": "markAsArray used"
+          "passed": false,
+          "detail": "markAsArray missing"
         },
         {
           "name": "uses_wf_vars",
@@ -946,8 +1043,8 @@
         }
       ],
       "required_substring_results": {
-        "_utils.array.new()": true,
-        "_utils.array.markAsArray": true,
+        "_utils.array.new()": false,
+        "_utils.array.markAsArray": false,
         "ZCDF_PACKAGES": true
       },
       "forbidden_pattern_results": {
@@ -955,7 +1052,12 @@
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:_utils.array.new()",
+        "missing_required:_utils.array.markAsArray",
+        "property_failed:uses_array_helper_new",
+        "property_failed:uses_mark_as_array"
+      ],
       "notes": ""
     },
     {
@@ -963,25 +1065,29 @@
       "category": "array_helpers",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local arr = wf.vars.items\nif type(arr) ~= \"table\" then\n    local wrapped = _utils.array.new()\n    table.insert(wrapped, arr)\n    return wrapped\nend\nreturn _utils.array.markAsArray(arr)",
+      "selected_strategy": "domain_strict",
+      "response": "local items = wf.vars.items\nif type(items) ~= \"table\" then\n    items = _utils.array.new()\nend\n_utils.array.markAsArray(items)\nreturn items",
       "metrics": {
         "request_count": 17,
-        "estimated_tokens": 46,
-        "validation_checks": 16,
+        "estimated_tokens": 34,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "domain_strict",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1017,25 +1123,29 @@
       "category": "array_helpers",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local arr = wf.initVariables.packages\nif type(arr) ~= \"table\" then\n    local wrapped = _utils.array.new()\n    table.insert(wrapped, arr)\n    return wrapped\nend\nreturn _utils.array.markAsArray(arr)",
+      "selected_strategy": "strict",
+      "response": "local packages = wf.initVariables.packages\nif type(packages) == \"table\" then\n    _utils.array.markAsArray(packages)\nend\nreturn packages",
       "metrics": {
         "request_count": 18,
-        "estimated_tokens": 49,
-        "validation_checks": 16,
+        "estimated_tokens": 33,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "strict",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1066,25 +1176,29 @@
       "category": "array_filter",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = _utils.array.new()\nlocal items = wf.vars.parsedCsv\nfor _, item in ipairs(items) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 19,
-        "estimated_tokens": 66,
-        "validation_checks": 13,
+        "estimated_tokens": 61,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1121,25 +1235,29 @@
       "category": "array_filter",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = _utils.array.new()\nlocal items = wf.vars.parsedCsv\nfor _, item in ipairs(items) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 20,
-        "estimated_tokens": 66,
-        "validation_checks": 12,
+        "estimated_tokens": 61,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1176,25 +1294,29 @@
       "category": "array_filter",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local result = _utils.array.new()\nlocal items = wf.vars.parsedCsv\nfor _, item in ipairs(items) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
+      "selected_strategy": "baseline",
+      "response": "local result = _utils.array.new()\nfor _, item in ipairs(wf.vars.parsedCsv) do\n    if (item.Discount ~= \"\" and item.Discount ~= nil) or (item.Markdown ~= \"\" and item.Markdown ~= nil) then\n        table.insert(result, item)\n    end\nend\nreturn result",
       "metrics": {
         "request_count": 21,
-        "estimated_tokens": 66,
-        "validation_checks": 13,
+        "estimated_tokens": 61,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1230,18 +1352,18 @@
       "case_id": "square_json_payload_smoke",
       "category": "json_payload",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "{\"num\":\"lua{return tonumber('5')}lua\",\"squared\":\"lua{local n = tonumber('5')\\nreturn n * n}lua\"}",
+      "ok": false,
+      "selected_strategy": "baseline_repair_2",
+      "response": "{\n    \"num\": \"lua{return tonumber(wf.vars.num)}lua\",\n    \"squared\": \"lua{local n = tonumber(wf.vars.num)\n                return n * n}lua\"\n}",
       "metrics": {
         "request_count": 22,
-        "estimated_tokens": 24,
-        "validation_checks": 13,
-        "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "estimated_tokens": 35,
+        "validation_checks": 14,
+        "validation_errors": 1,
+        "candidate_count": 7,
+        "selected_strategy": "baseline_repair_2",
         "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 0,
+        "repair_attempts_used": 4,
         "assumptions": [
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля.",
           "Если схема JSON не указана, нужно вернуть только минимальные явно запрошенные поля."
@@ -1249,18 +1371,28 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
-          "template_selected:candidate_ready",
-          "final_selected:passed"
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "validation_failed:failed",
+          "final_selected:failed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3,
+          "repair": 4
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": true,
-          "detail": "validation_errors=0"
+          "passed": false,
+          "detail": "validation_errors=1"
         },
         {
           "name": "json_payload_wrapped",
@@ -1269,33 +1401,37 @@
         }
       ],
       "required_substring_results": {
-        "\"num\":\"lua{": true,
-        "\"squared\":\"lua{": true
+        "\"num\":\"lua{": false,
+        "\"squared\":\"lua{": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:\"num\":\"lua{",
+        "missing_required:\"squared\":\"lua{",
+        "property_failed:validation_passed"
+      ],
       "notes": ""
     },
     {
       "case_id": "square_json_payload_variant",
       "category": "json_payload",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "{\"num\":\"lua{return tonumber('12')}lua\",\"squared\":\"lua{local n = tonumber('12')\\nreturn n * n}lua\"}",
+      "ok": false,
+      "selected_strategy": "json_payload_repair_1",
+      "response": "{\"num\":\"lua{return tonumber('12')}lua\",\"squared\":\"lua{local n = tonumber('12')\nreturn n * n}lua\"}",
       "metrics": {
         "request_count": 23,
         "estimated_tokens": 24,
-        "validation_checks": 13,
-        "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "validation_checks": 14,
+        "validation_errors": 1,
+        "candidate_count": 6,
+        "selected_strategy": "json_payload_repair_1",
         "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 0,
+        "repair_attempts_used": 3,
         "assumptions": [
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля.",
           "Если схема JSON не указана, нужно вернуть только минимальные явно запрошенные поля."
@@ -1303,18 +1439,27 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
-          "template_selected:candidate_ready",
-          "final_selected:passed"
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "validation_failed:failed",
+          "final_selected:failed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3,
+          "repair": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": true,
-          "detail": "validation_errors=0"
+          "passed": false,
+          "detail": "validation_errors=1"
         },
         {
           "name": "json_payload_wrapped",
@@ -1331,44 +1476,56 @@
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "property_failed:validation_passed"
+      ],
       "notes": ""
     },
     {
       "case_id": "selected_json_fields",
       "category": "json_payload",
       "difficulty": "medium",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "{\"orderId\":\"lua{return wf.vars.orderId}lua\",\"customerEmail\":\"lua{return wf.vars.customerEmail}lua\"}",
+      "ok": false,
+      "selected_strategy": "baseline_repair_1",
+      "response": "lua{orderId = wf.vars.orderId, customerEmail = wf.vars.customerEmail}lua",
       "metrics": {
         "request_count": 24,
-        "estimated_tokens": 24,
-        "validation_checks": 15,
-        "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "estimated_tokens": 18,
+        "validation_checks": 16,
+        "validation_errors": 1,
+        "candidate_count": 7,
+        "selected_strategy": "baseline_repair_1",
         "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 0,
+        "repair_attempts_used": 4,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
-          "final_selected:passed"
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
+          "validation_failed:failed",
+          "final_selected:failed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3,
+          "repair": 4
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
           "name": "validation_passed",
-          "passed": true,
-          "detail": "validation_errors=0"
+          "passed": false,
+          "detail": "validation_errors=1"
         },
         {
           "name": "json_payload_wrapped",
-          "passed": true,
-          "detail": "JSON payload wrapped"
+          "passed": false,
+          "detail": "JSON wrappers missing"
         },
         {
           "name": "uses_wf_vars",
@@ -1377,15 +1534,20 @@
         }
       ],
       "required_substring_results": {
-        "\"orderId\":\"lua{": true,
-        "\"customerEmail\":\"lua{": true
+        "\"orderId\":\"lua{": false,
+        "\"customerEmail\":\"lua{": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:\"orderId\":\"lua{",
+        "missing_required:\"customerEmail\":\"lua{",
+        "property_failed:validation_passed",
+        "property_failed:json_payload_wrapped"
+      ],
       "notes": ""
     },
     {
@@ -1393,25 +1555,29 @@
       "category": "datetime_unix",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local iso_time = wf.initVariables.recallTime\nif not iso_time or not iso_time:match(\"^%d%d%d%d%-%d%d%-%d%dT\") then\n    return nil\nend\nlocal year = tonumber(iso_time:sub(1, 4))\nlocal month = tonumber(iso_time:sub(6, 7))\nlocal day = tonumber(iso_time:sub(9, 10))\nlocal hour = tonumber(iso_time:sub(12, 13))\nlocal minute = tonumber(iso_time:sub(15, 16))\nlocal second = tonumber(iso_time:sub(18, 19))\nlocal timestamp = os.time({year = year, month = month, day = day, hour = hour, min = minute, sec = second})\nlocal sign, tz_hour, tz_minute = iso_time:match(\"([%+%-])(%d%d):(%d%d)$\")\nif sign and tz_hour and tz_minute then\n    local shift = tonumber(tz_hour) * 3600 + tonumber(tz_minute) * 60\n    if sign == \"+\" then\n        timestamp = timestamp - shift\n    else\n        timestamp = timestamp + shift\n    end\nend\nreturn timestamp",
+      "selected_strategy": "baseline",
+      "response": "local y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)\")\nreturn os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})",
       "metrics": {
         "request_count": 25,
-        "estimated_tokens": 206,
-        "validation_checks": 14,
+        "estimated_tokens": 61,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1447,25 +1613,29 @@
       "category": "datetime_unix",
       "difficulty": "medium",
       "ok": true,
-      "selected_strategy": "template",
-      "response": "local iso_time = wf.initVariables.recallTime\nif not iso_time or not iso_time:match(\"^%d%d%d%d%-%d%d%-%d%dT\") then\n    return nil\nend\nlocal year = tonumber(iso_time:sub(1, 4))\nlocal month = tonumber(iso_time:sub(6, 7))\nlocal day = tonumber(iso_time:sub(9, 10))\nlocal hour = tonumber(iso_time:sub(12, 13))\nlocal minute = tonumber(iso_time:sub(15, 16))\nlocal second = tonumber(iso_time:sub(18, 19))\nlocal timestamp = os.time({year = year, month = month, day = day, hour = hour, min = minute, sec = second})\nlocal sign, tz_hour, tz_minute = iso_time:match(\"([%+%-])(%d%d):(%d%d)$\")\nif sign and tz_hour and tz_minute then\n    local shift = tonumber(tz_hour) * 3600 + tonumber(tz_minute) * 60\n    if sign == \"+\" then\n        timestamp = timestamp - shift\n    else\n        timestamp = timestamp + shift\n    end\nend\nreturn timestamp",
+      "selected_strategy": "baseline",
+      "response": "local y, m, d, h, mi, s = wf.initVariables.recallTime:match(\"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)\")\nreturn os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = tonumber(h), min = tonumber(mi), sec = tonumber(s)})",
       "metrics": {
         "request_count": 26,
-        "estimated_tokens": 206,
-        "validation_checks": 14,
+        "estimated_tokens": 61,
+        "validation_checks": 19,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1501,25 +1671,29 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.orderId",
       "metrics": {
         "request_count": 27,
         "estimated_tokens": 5,
-        "validation_checks": 14,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1554,25 +1728,29 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.customerEmail",
       "metrics": {
         "request_count": 28,
         "estimated_tokens": 7,
-        "validation_checks": 14,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1607,25 +1785,29 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.initVariables.userId",
       "metrics": {
         "request_count": 29,
         "estimated_tokens": 7,
-        "validation_checks": 14,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1660,25 +1842,29 @@
       "category": "direct_return",
       "difficulty": "easy",
       "ok": true,
-      "selected_strategy": "template",
+      "selected_strategy": "baseline",
       "response": "return wf.vars.json.order.id",
       "metrics": {
         "request_count": 30,
         "estimated_tokens": 7,
-        "validation_checks": 14,
+        "validation_checks": 18,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 3,
+        "selected_strategy": "baseline",
         "luac_status": "skipped_with_reason",
         "repair_attempts_used": 0,
         "assumptions": [],
         "trace": [
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1712,18 +1898,18 @@
       "case_id": "judged_assumption_without_context",
       "category": "assumptions",
       "difficulty": "hard",
-      "ok": true,
-      "selected_strategy": "template",
-      "response": "{\"num\":\"lua{return tonumber('5')}lua\",\"squared\":\"lua{local n = tonumber('5')\\nreturn n * n}lua\"}",
+      "ok": false,
+      "selected_strategy": "baseline_repair_1",
+      "response": "{\n    \"squared\": \"lua{local n = tonumber(wf.vars.num) return n * n}lua\"\n}",
       "metrics": {
         "request_count": 31,
-        "estimated_tokens": 24,
-        "validation_checks": 13,
+        "estimated_tokens": 18,
+        "validation_checks": 16,
         "validation_errors": 0,
-        "candidate_count": 1,
-        "selected_strategy": "template",
+        "candidate_count": 5,
+        "selected_strategy": "baseline_repair_1",
         "luac_status": "skipped_with_reason",
-        "repair_attempts_used": 0,
+        "repair_attempts_used": 2,
         "assumptions": [
           "Исходный код не предоставлен, поэтому нужен новый LocalScript-кандидат с нуля.",
           "Workflow-контекст не задан; нельзя придумывать sample values и лишние поля."
@@ -1731,12 +1917,19 @@
         "trace": [
           "assumed:applied",
           "assumed:applied",
-          "template_selected:candidate_ready",
+          "llm_cycle_started:running",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "llm_generated:candidate_ready",
+          "repaired:candidate_ready",
+          "repaired:candidate_ready",
           "final_selected:passed"
         ],
         "strategy_distribution": {
-          "template": 1
-        }
+          "llm": 3,
+          "repair": 2
+        },
+        "runtime_info": {}
       },
       "property_results": [
         {
@@ -1751,14 +1944,16 @@
         }
       ],
       "required_substring_results": {
-        "\"squared\":\"lua{": true
+        "\"squared\":\"lua{": false
       },
       "forbidden_pattern_results": {
         "```": true,
         "$.": true,
         "$[": true
       },
-      "failure_reasons": [],
+      "failure_reasons": [
+        "missing_required:\"squared\":\"lua{"
+      ],
       "notes": "Проверка judged-mode assumptions без интерактивного уточнения."
     }
   ]

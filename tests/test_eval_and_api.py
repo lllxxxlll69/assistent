@@ -18,6 +18,13 @@ from assistant.models import AssistantResponse
 
 
 class _StubOrchestrator:
+    class _StubLLMClient:
+        def warm_up(self, *_: object, **__: object) -> float:
+            return 0.123
+
+    def __init__(self) -> None:
+        self.llm_client = self._StubLLMClient()
+
     async def generate_localscript_response(self, *_: object, **__: object) -> AssistantResponse:
         return AssistantResponse(
             text="return wf.vars.orderId",
@@ -44,12 +51,48 @@ class EvalAndAPITests(unittest.IsolatedAsyncioTestCase):
             "cases_passed": 5,
             "pass_rate": 100.0,
         }
-        with patch("assistant.localscript.self_check.run_eval_suite", return_value=stub_smoke_report):
-            report = await run_self_check(run_full_eval=False)
+        stub_runtime = type(
+            "StubRuntime",
+            (),
+            {
+                "gpu_samples": [{"name": "Test GPU", "memory_used_mib": 1024, "memory_total_mib": 8192}],
+                "to_dict": lambda self: {
+                    "api_root": "http://127.0.0.1:11434",
+                    "version": "0.12.4",
+                    "loaded_models": [],
+                    "gpu_samples": [{"name": "Test GPU", "memory_used_mib": 1024, "memory_total_mib": 8192}],
+                },
+            },
+        )()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            backend = _StubBackend(Path(tmp_dir) / "settings.json")
+            backend.settings_manager.update_settings(
+                localscript_runtime_guard=True,
+                localscript_require_full_gpu=True,
+            )
+            with (
+                patch("assistant.localscript.self_check.build_backend", return_value=backend),
+                patch("assistant.localscript.self_check.run_eval_suite", return_value=stub_smoke_report),
+                patch("assistant.localscript.self_check.probe_ollama_runtime", return_value=stub_runtime),
+                patch(
+                    "assistant.localscript.self_check.build_runtime_constraints",
+                    return_value=[
+                        ("runtime_single_model_loaded", True, "loaded_models=1"),
+                        ("localscript_model_loaded", True, "localscript_model=qwen2.5-coder:7b"),
+                        ("runtime_context_matches", True, "context_length=4096"),
+                        ("runtime_vram_budget", True, "size_vram_bytes=5053130752"),
+                        ("runtime_gpu_only", True, "vram_ratio=1.0000"),
+                        ("runtime_digest_present", True, "digest=sha256:test"),
+                    ],
+                ),
+            ):
+                report = await run_self_check(run_full_eval=False)
         statuses = {item["name"]: item["status"] for item in report["checks"]}
-        self.assertIn(statuses["smoke_eval"], {"passed", "failed"})
+        self.assertEqual(statuses["smoke_eval"], "passed")
         self.assertEqual(statuses["full_eval"], "skipped_with_reason")
         self.assertIn("pinned_python_dependencies", statuses)
+        self.assertEqual(statuses["runtime_guard_enabled"], "passed")
+        self.assertEqual(report["knowledge_eval_overlap"]["exact_overlap_count"], 0)
 
     async def test_http_api_generate_endpoint_returns_code_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

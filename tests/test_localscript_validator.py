@@ -6,8 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from assistant.config.settings import SettingsManager
+from assistant.localscript.eval_cases import get_eval_cases
 from assistant.localscript.evaluator import run_eval_suite
-from assistant.localscript.knowledge import LocalScriptKnowledgeBase
+from assistant.localscript.knowledge import LocalScriptKnowledgeBase, find_exact_prompt_overlaps
 from assistant.localscript.service import LocalScriptService
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.models import Message
@@ -21,11 +22,18 @@ LAST_EMAIL_TASK = (
 class StubLLMClient:
     def __init__(self, responses: list[str]) -> None:
         self.responses = list(responses)
+        self.requested_models: list[str] = []
 
     def chat(self, messages: list[dict[str, str]], **_: object) -> str:
+        model = _.get("model")
+        if isinstance(model, str):
+            self.requested_models.append(model)
         if not self.responses:
             raise AssertionError("StubLLMClient does not have any responses left.")
         return self.responses.pop(0)
+
+    def warm_up(self, *_: object, **__: object) -> float:
+        return 0.0
 
 
 class LocalScriptValidatorTests(unittest.TestCase):
@@ -112,6 +120,11 @@ class LocalScriptKnowledgeTests(unittest.TestCase):
         self.assertNotIn("return wf.vars.emails[#wf.vars.emails]", guidance)
 
 
+    def test_public_examples_do_not_exactly_match_public_eval_prompts(self) -> None:
+        overlaps = find_exact_prompt_overlaps([(case.id, case.prompt) for case in get_eval_cases(smoke_only=False)])
+        self.assertEqual(overlaps, [])
+
+
 class LocalScriptServiceTests(unittest.TestCase):
     def test_requests_clarification_for_ambiguous_short_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -190,6 +203,24 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertEqual(generation.selected_strategy, "baseline")
         self.assertTrue(any(item.stage == "llm_cycle_started" for item in generation.trace))
 
+    def test_judged_generation_uses_dedicated_localscript_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(
+                localscript_candidate_count=1,
+                localscript_repair_attempts=0,
+                localscript_model="contest-model:1b",
+            )
+            llm = StubLLMClient(["return wf.vars.emails[#wf.vars.emails]"])
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            generation = service.generate(
+                LAST_EMAIL_TASK,
+                allow_clarification=False,
+                interaction_mode="judged",
+            )
+        self.assertEqual(generation.code, "return wf.vars.emails[#wf.vars.emails]")
+        self.assertEqual(llm.requested_models, ["contest-model:1b"])
+
     def test_generation_prompt_includes_self_check_and_reference_examples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             manager = SettingsManager(Path(tmp_dir) / "settings.json")
@@ -205,7 +236,7 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertIn("Internal self-check", system_prompt)
         self.assertIn("Reference implementations for similar task shapes", system_prompt)
         self.assertIn("Expected output:", system_prompt)
-        self.assertIn("return wf.vars.emails[#wf.vars.emails]", system_prompt)
+        self.assertIn("return wf.vars.inboxEmails[#wf.vars.inboxEmails]", system_prompt)
 
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):

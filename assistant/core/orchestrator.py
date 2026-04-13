@@ -7,6 +7,7 @@ from typing import Any
 
 from assistant.config.settings import SettingsManager
 from assistant.core.agent import Agent
+from assistant.core.clarification import ClarificationHelper
 from assistant.llm.client import LLMClient
 from assistant.llm.prompts import build_auto_mode_prompt, build_chat_messages, build_system_prompt
 from assistant.localscript.service import LocalScriptService
@@ -46,6 +47,7 @@ class Orchestrator:
         self.search_tools = search_tools
         self.localscript_service = localscript_service
         self.project_agent_service = project_agent_service
+        self.clarification_helper = ClarificationHelper()
         self.request_count = 0
 
     async def handle(self, user_input: str, *, assistant_profile: str | None = None) -> AssistantResponse:
@@ -59,8 +61,15 @@ class Orchestrator:
         assistant_profile: str | None = None,
     ) -> AssistantResponse:
         self.request_count += 1
+        previous_context = self.memory_manager.get_context()
         self.memory_manager.add_message("user", user_input)
         if self._is_agent_profile(assistant_profile):
+            clarification = self.clarification_helper.for_agent(user_input, previous_context)
+            if clarification.should_ask:
+                return self._finalize_response(
+                    clarification.question,
+                    [ActionLogEntry(message=clarification.reason)],
+                )
             return await self.generate_project_agent_response(
                 user_input,
                 persist_memory=True,
@@ -142,6 +151,14 @@ class Orchestrator:
                 use_memory_context=True,
                 count_request=False,
             )
+
+        if action.action_type == ActionType.RESPOND:
+            clarification = self.clarification_helper.for_chat(user_input, previous_context)
+            if clarification.should_ask:
+                return self._finalize_response(
+                    clarification.question,
+                    [ActionLogEntry(message=clarification.reason)],
+                )
 
         answer = await self._generate_user_visible_response(user_input, [], on_text_chunk)
         return self._finalize_response(answer, logs)
@@ -441,4 +458,5 @@ class Orchestrator:
                 item.source: sum(1 for candidate in generation.candidate_reports if candidate.source == item.source)
                 for item in generation.candidate_reports
             },
+            "runtime_info": dict(generation.runtime_info),
         }
