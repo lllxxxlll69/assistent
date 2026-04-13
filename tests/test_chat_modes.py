@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from assistant.config.settings import SettingsManager
+from assistant.core.clarification import ClarificationHelper
 from assistant.llm.prompts import build_chat_messages, build_system_prompt
 from assistant.memory.memory_manager import MemoryManager
 
@@ -13,6 +14,7 @@ class ChatModeTests(unittest.TestCase):
     def test_russian_system_prompt_enforces_russian_answers(self) -> None:
         prompt = build_system_prompt("ru")
         self.assertIn("русском языке", prompt.lower())
+        self.assertIn("наводящий вопрос", prompt.lower())
 
         messages = build_chat_messages(
             system_prompt=prompt,
@@ -21,6 +23,18 @@ class ChatModeTests(unittest.TestCase):
             retrieval_chunks=[],
         )
         self.assertTrue(any("только на русском языке" in item["content"].lower() for item in messages))
+        self.assertTrue(any("наводящий вопрос" in item["content"].lower() for item in messages))
+
+    def test_clarification_helper_asks_one_guiding_question_for_vague_chat_request(self) -> None:
+        decision = ClarificationHelper().for_chat("Сделай это лучше", [])
+
+        self.assertTrue(decision.should_ask)
+        self.assertIn("Что именно", decision.question)
+
+    def test_clarification_helper_allows_project_analysis_in_agent_mode(self) -> None:
+        decision = ClarificationHelper().for_agent("Проанализируй весь проект и найди узкие места.", [])
+
+        self.assertFalse(decision.should_ask)
 
     def test_session_mode_is_saved_and_restored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

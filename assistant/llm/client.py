@@ -270,17 +270,27 @@ class LLMClient:
         context_size_override: int | None = None,
         temperature_override: float | None = None,
     ) -> dict[str, object]:
+        options: dict[str, Any] = {
+            "temperature": self.settings.temperature if temperature_override is None else temperature_override,
+            "num_predict": max_tokens_override or self.settings.max_tokens,
+            "num_ctx": context_size_override or self.settings.context_size,
+            "num_batch": self.settings.batch_size,
+        }
+        if self.settings.gpu_layers != 0:
+            options["num_gpu"] = self.settings.gpu_layers
+        if self.settings.main_gpu >= 0:
+            options["main_gpu"] = self.settings.main_gpu
+        if self.settings.cpu_threads > 0:
+            options["num_thread"] = self.settings.cpu_threads
+        if self.settings.low_vram:
+            options["low_vram"] = True
+
         return {
             "model": model,
             "messages": messages,
             "stream": stream,
-            "options": {
-                "temperature": self.settings.temperature if temperature_override is None else temperature_override,
-                "num_predict": max_tokens_override or self.settings.max_tokens,
-                "num_ctx": context_size_override or self.settings.context_size,
-                "num_batch": self.settings.batch_size,
-            },
-            "keep_alive": "30m",
+            "options": options,
+            "keep_alive": self.settings.keep_alive,
         }
 
     def _extract_content(self, data: dict[str, Any], *, strip: bool = True) -> str | None:

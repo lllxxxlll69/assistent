@@ -122,6 +122,7 @@ class ProjectAgentService:
         if retrieval:
             paths = ", ".join(self._summarize_chunk_paths(retrieval, root))
             self._push_progress(on_progress_update, f"Нашёл релевантные файлы: {paths}.")
+            self._announce_retrieval_reads(retrieval, root, on_progress_update)
         else:
             self._push_progress(on_progress_update, "Явных совпадений не нашёл, опираюсь на структуру проекта.")
         self._push_progress(on_progress_update, "Составляю план изменений по проекту.")
@@ -227,6 +228,7 @@ class ProjectAgentService:
                     unresolved_review_issues.extend(verified.unresolved_issues)
                     result = tools["file"].create_file(item.path, verified.content)
                 else:
+                    self._push_progress(on_progress_update, f"Прочитал файл {item.path}, готовлю точечные правки.")
                     new_content = self._generate_file_content(
                         task=task,
                         action=item,
@@ -303,6 +305,7 @@ class ProjectAgentService:
             generated_action = _PlannedAction(type="create", path=action.target_path, instructions=task, reason="Создаю файл")
             retrieval = tools["search"].retrieve_chunks(task, Path(workspace_root))
             tree_summary = self._render_tree(Path(workspace_root))
+            self._announce_retrieval_reads(retrieval, Path(workspace_root), on_progress_update)
             content = inline_content or self._generate_file_content(
                 task=task,
                 action=generated_action,
@@ -350,8 +353,10 @@ class ProjectAgentService:
             inline_content = action.content or self._extract_inline_content(task)
             retrieval = tools["search"].retrieve_chunks(task, Path(workspace_root))
             tree_summary = self._render_tree(Path(workspace_root))
+            self._announce_retrieval_reads(retrieval, Path(workspace_root), on_progress_update)
             content = inline_content
             if not content and (not read_result.logs or read_result.logs[-1].success):
+                self._push_progress(on_progress_update, f"Прочитал файл {action.target_path}, формирую новую версию.")
                 content = self._generate_file_content(
                     task=task,
                     action=_PlannedAction(type="edit", path=action.target_path, instructions=task, reason="Правлю файл"),
@@ -453,6 +458,8 @@ class ProjectAgentService:
                 "- Если запрос просит изменение кода, выбери edit.\n"
                 "- Если файла ещё нет, выбери create.\n"
                 "- Если правки не нужны, верни action type=answer.\n"
+                "- Если запроса недостаточно для безопасной правки, не придумывай изменения: "
+                "верни action type=answer и задай один короткий уточняющий вопрос в поле reply.\n"
                 "- Не более 3 действий.\n"
                 "- Никакого markdown."
             ),
@@ -816,6 +823,15 @@ class ProjectAgentService:
             path = self._normalize_relative_path(chunk.path, workspace_root)
             blocks.append(f"File: {path}\nScore: {chunk.score:.3f}\n{chunk.snippet}")
         return "\n\n".join(blocks)
+
+    def _announce_retrieval_reads(
+        self,
+        retrieval: list[RetrievalChunk],
+        workspace_root: Path,
+        on_progress_update: Callable[[str], None] | None,
+    ) -> None:
+        for path in self._summarize_chunk_paths(retrieval, workspace_root):
+            self._push_progress(on_progress_update, f"Читаю для контекста файл {path}.")
 
     def _truncate_text(self, text: str, max_chars: int, label: str) -> str:
         if len(text) <= max_chars:

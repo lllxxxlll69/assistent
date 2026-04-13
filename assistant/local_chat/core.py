@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
+import mimetypes
 import queue
 import socket
 import threading
@@ -9,6 +12,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -19,6 +23,7 @@ DEFAULT_DISCOVERY_PORT = 47001
 DISCOVERY_INTERVAL = 3.0
 PEER_TTL = 12.0
 MAX_MESSAGE_LEN = 2000
+MAX_FILE_BYTES = 20 * 1024 * 1024
 BUFFER_SIZE = 65535
 
 
@@ -58,6 +63,10 @@ def detect_local_ip() -> str:
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def pretty_age(seconds: float) -> str:
@@ -120,12 +129,17 @@ class LanChatMessenger:
         tcp_port: int = DEFAULT_TCP_PORT,
         discovery_port: int = DEFAULT_DISCOVERY_PORT,
         mac_override: str | None = None,
+        received_files_dir: str | None = None,
     ) -> None:
         self.name = name.strip() or socket.gethostname()
         self.mac = format_mac(mac_override) if mac_override else local_mac()
         self.ip = detect_local_ip()
         self.tcp_port = tcp_port
         self.discovery_port = discovery_port
+        self.received_files_dir = Path(received_files_dir or ".assistant_data/local_chat_inbox").expanduser().resolve(
+            strict=False
+        )
+        self.received_files_dir.mkdir(parents=True, exist_ok=True)
         seed = f"{self.mac}|{self.name}|{self.ip}|{time.time_ns()}"
         self.session_id = sha256_text(seed)[:16]
 
@@ -232,6 +246,10 @@ class LanChatMessenger:
     def send_message(self, peer_mac_query: str, text: str) -> dict[str, Any]:
         peer_mac = self._resolve_mac_query(peer_mac_query)
         return self._send_to_peer(peer_mac, text)
+
+    def send_file(self, peer_mac_query: str, file_path: str | Path) -> dict[str, Any]:
+        peer_mac = self._resolve_mac_query(peer_mac_query)
+        return self._send_file_to_peer(peer_mac, Path(file_path))
 
     def broadcast_message(self, text: str) -> int:
         text = text.strip()
@@ -421,7 +439,7 @@ class LanChatMessenger:
             thread.start()
 
     def _handle_client(self, conn: socket.socket, addr: tuple[str, int]) -> None:
-        conn.settimeout(3.0)
+        conn.settimeout(15.0)
         chunks: list[bytes] = []
         try:
             while True:
@@ -435,45 +453,10 @@ class LanChatMessenger:
                 return
             raw_line = b"".join(chunks).splitlines()[0].decode("utf-8")
             payload = json.loads(raw_line)
-            if payload.get("type") != "chat":
+            response = self._process_payload(payload, addr)
+            if response is None:
                 return
-            peer_mac = format_mac(str(payload.get("from_mac", "")))
-            if peer_mac == self.mac:
-                return
-            peer_name = str(payload.get("from_name") or "unknown")
-            peer_port = safe_int(payload.get("reply_port"), DEFAULT_TCP_PORT)
-            session_id = str(payload.get("session_id") or "")
-            text = str(payload.get("text") or "").strip()
-            sent_at = str(payload.get("timestamp") or now_iso())
-            if not text:
-                raise ValueError("Пустое сообщение")
-            if len(text) > MAX_MESSAGE_LEN:
-                raise ValueError("Слишком длинное сообщение")
-            self._upsert_peer(peer_mac, peer_name, addr[0], peer_port, session_id)
-            record = self._append_ledger_event(
-                {
-                    "direction": "in",
-                    "peer_mac": peer_mac,
-                    "peer_name": peer_name,
-                    "peer_ip": addr[0],
-                    "timestamp": sent_at,
-                    "text": text,
-                    "message_id": str(payload.get("message_id") or ""),
-                }
-            )
-            response = {
-                "status": "ok",
-                "received_at": now_iso(),
-                "block_hash": record["block_hash"],
-            }
             conn.sendall((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
-            self._emit(
-                "message_received",
-                peer_mac=peer_mac,
-                peer_name=peer_name,
-                text=text,
-                timestamp=sent_at,
-            )
         except (OSError, ValueError, json.JSONDecodeError):
             try:
                 conn.sendall(b'{"status":"error"}\n')
@@ -481,6 +464,118 @@ class LanChatMessenger:
                 pass
         finally:
             conn.close()
+
+    def _process_payload(self, payload: dict[str, Any], addr: tuple[str, int]) -> dict[str, Any] | None:
+        payload_type = str(payload.get("type") or "")
+        if payload_type == "chat":
+            return self._process_chat_payload(payload, addr)
+        if payload_type == "file":
+            return self._process_file_payload(payload, addr)
+        return None
+
+    def _process_chat_payload(self, payload: dict[str, Any], addr: tuple[str, int]) -> dict[str, Any]:
+        peer_mac, peer_name, peer_port, session_id, sent_at = self._extract_peer_payload(payload, addr)
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("Пустое сообщение")
+        if len(text) > MAX_MESSAGE_LEN:
+            raise ValueError("Слишком длинное сообщение")
+        self._upsert_peer(peer_mac, peer_name, addr[0], peer_port, session_id)
+        record = self._append_ledger_event(
+            {
+                "direction": "in",
+                "kind": "message",
+                "peer_mac": peer_mac,
+                "peer_name": peer_name,
+                "peer_ip": addr[0],
+                "timestamp": sent_at,
+                "text": text,
+                "message_id": str(payload.get("message_id") or ""),
+            }
+        )
+        self._emit(
+            "message_received",
+            peer_mac=peer_mac,
+            peer_name=peer_name,
+            text=text,
+            timestamp=sent_at,
+        )
+        return {
+            "status": "ok",
+            "received_at": now_iso(),
+            "block_hash": record["block_hash"],
+        }
+
+    def _process_file_payload(self, payload: dict[str, Any], addr: tuple[str, int]) -> dict[str, Any]:
+        peer_mac, peer_name, peer_port, session_id, sent_at = self._extract_peer_payload(payload, addr)
+        encoded = str(payload.get("data_base64") or "")
+        if not encoded:
+            raise ValueError("Файл не содержит данных")
+        try:
+            raw_bytes = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Не удалось декодировать бинарный payload файла") from exc
+        if not raw_bytes:
+            raise ValueError("Получен пустой файл")
+        if len(raw_bytes) > MAX_FILE_BYTES:
+            raise ValueError("Файл превышает допустимый размер")
+        declared_size = safe_int(payload.get("file_size"), 0)
+        if declared_size and declared_size != len(raw_bytes):
+            raise ValueError("Размер файла не совпадает с payload")
+        actual_sha256 = sha256_bytes(raw_bytes)
+        declared_sha256 = str(payload.get("file_sha256") or "")
+        if declared_sha256 and declared_sha256 != actual_sha256:
+            raise ValueError("Контрольная сумма файла не совпадает")
+
+        file_name = self._safe_file_name(str(payload.get("file_name") or "received.bin"))
+        mime_type = str(payload.get("mime_type") or "application/octet-stream")
+        saved_path = self._store_incoming_file(peer_mac, file_name, raw_bytes)
+        self._upsert_peer(peer_mac, peer_name, addr[0], peer_port, session_id)
+        record = self._append_ledger_event(
+            {
+                "direction": "in",
+                "kind": "file",
+                "peer_mac": peer_mac,
+                "peer_name": peer_name,
+                "peer_ip": addr[0],
+                "timestamp": sent_at,
+                "text": f"[Файл] {file_name}",
+                "message_id": str(payload.get("message_id") or ""),
+                "file_name": file_name,
+                "file_size": len(raw_bytes),
+                "file_sha256": actual_sha256,
+                "mime_type": mime_type,
+                "saved_path": str(saved_path),
+            }
+        )
+        self._emit(
+            "file_received",
+            peer_mac=peer_mac,
+            peer_name=peer_name,
+            file_name=file_name,
+            file_size=len(raw_bytes),
+            saved_path=str(saved_path),
+            timestamp=sent_at,
+        )
+        return {
+            "status": "ok",
+            "received_at": now_iso(),
+            "block_hash": record["block_hash"],
+        }
+
+    def _extract_peer_payload(
+        self,
+        payload: dict[str, Any],
+        addr: tuple[str, int],
+    ) -> tuple[str, str, int, str, str]:
+        peer_mac = format_mac(str(payload.get("from_mac", "")))
+        if peer_mac == self.mac:
+            raise ValueError("Нельзя обработать собственный payload")
+        peer_name = str(payload.get("from_name") or "unknown")
+        peer_port = safe_int(payload.get("reply_port"), DEFAULT_TCP_PORT)
+        session_id = str(payload.get("session_id") or "")
+        sent_at = str(payload.get("timestamp") or now_iso())
+        return peer_mac, peer_name, peer_port, session_id, sent_at
 
     def _send_to_peer(self, peer_mac: str, text: str) -> dict[str, Any]:
         text = text.strip()
@@ -511,6 +606,7 @@ class LanChatMessenger:
         record = self._append_ledger_event(
             {
                 "direction": "out",
+                "kind": "message",
                 "peer_mac": peer.mac,
                 "peer_name": peer.name,
                 "peer_ip": peer.ip,
@@ -530,10 +626,93 @@ class LanChatMessenger:
         )
         return record
 
+    def _send_file_to_peer(self, peer_mac: str, file_path: Path) -> dict[str, Any]:
+        if not file_path.exists() or not file_path.is_file():
+            raise ValueError(f"Файл не найден: {file_path}")
+        raw_bytes = file_path.read_bytes()
+        if not raw_bytes:
+            raise ValueError("Нельзя отправить пустой файл.")
+        if len(raw_bytes) > MAX_FILE_BYTES:
+            raise ValueError(f"Файл больше {MAX_FILE_BYTES // (1024 * 1024)} МБ.")
+
+        with self.peer_lock:
+            peer = self.peers.get(peer_mac)
+        if not peer:
+            raise ValueError("Пир не найден. Сначала дождитесь discovery или добавьте пира вручную.")
+
+        message_id = sha256_text(f"{self.mac}|{peer_mac}|{file_path.name}|{time.time_ns()}")[:20]
+        mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        payload = {
+            "type": "file",
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "message_id": message_id,
+            "from_mac": self.mac,
+            "from_name": self.name,
+            "reply_port": self.tcp_port,
+            "session_id": self.session_id,
+            "timestamp": now_iso(),
+            "file_name": file_path.name,
+            "file_size": len(raw_bytes),
+            "file_sha256": sha256_bytes(raw_bytes),
+            "mime_type": mime_type,
+            "data_base64": base64.b64encode(raw_bytes).decode("ascii"),
+        }
+        ack = self._send_tcp_payload(peer.ip, peer.port, payload)
+        if ack.get("status") != "ok":
+            raise ValueError("Пир отклонил файл.")
+        record = self._append_ledger_event(
+            {
+                "direction": "out",
+                "kind": "file",
+                "peer_mac": peer.mac,
+                "peer_name": peer.name,
+                "peer_ip": peer.ip,
+                "timestamp": payload["timestamp"],
+                "text": f"[Файл] {file_path.name}",
+                "message_id": message_id,
+                "file_name": file_path.name,
+                "file_size": len(raw_bytes),
+                "file_sha256": payload["file_sha256"],
+                "mime_type": mime_type,
+                "saved_path": str(file_path.resolve(strict=False)),
+                "remote_block_hash": ack.get("block_hash", ""),
+            }
+        )
+        self._emit(
+            "file_sent",
+            peer_mac=peer.mac,
+            peer_name=peer.name,
+            file_name=file_path.name,
+            file_size=len(raw_bytes),
+            timestamp=payload["timestamp"],
+            block_hash=record["block_hash"],
+        )
+        return record
+
+    def _safe_file_name(self, raw_name: str) -> str:
+        cleaned = Path(raw_name).name.strip().replace("\x00", "")
+        cleaned = cleaned.replace("/", "_").replace("\\", "_")
+        return cleaned or "received.bin"
+
+    def _store_incoming_file(self, peer_mac: str, file_name: str, raw_bytes: bytes) -> Path:
+        target_dir = self.received_files_dir / compact_mac(peer_mac)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stem = Path(file_name).stem or "received"
+        suffix = Path(file_name).suffix
+        timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+        candidate = target_dir / f"{timestamp}_{stem}{suffix}"
+        counter = 1
+        while candidate.exists():
+            candidate = target_dir / f"{timestamp}_{stem}_{counter}{suffix}"
+            counter += 1
+        candidate.write_bytes(raw_bytes)
+        return candidate
+
     def _send_tcp_payload(self, ip: str, port: int, payload: dict[str, Any]) -> dict[str, Any]:
         data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
-        with socket.create_connection((ip, port), timeout=5.0) as sock:
-            sock.settimeout(5.0)
+        with socket.create_connection((ip, port), timeout=15.0) as sock:
+            sock.settimeout(15.0)
             sock.sendall(data)
             sock.shutdown(socket.SHUT_WR)
             chunks: list[bytes] = []

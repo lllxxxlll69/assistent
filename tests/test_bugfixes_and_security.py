@@ -27,6 +27,22 @@ class BugfixAndSecurityTests(unittest.TestCase):
             settings = manager.get_settings()
         self.assertEqual(settings.model, "env-model")
 
+    def test_runtime_env_overrides_apply_on_first_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            "os.environ",
+            {
+                "ASSISTANT_GPU_LAYERS": "42",
+                "ASSISTANT_KEEP_ALIVE": "45m",
+                "ASSISTANT_LOW_VRAM": "1",
+            },
+        ):
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            settings = manager.get_settings()
+
+        self.assertEqual(settings.gpu_layers, 42)
+        self.assertEqual(settings.keep_alive, "45m")
+        self.assertTrue(settings.low_vram)
+
     def test_memory_summary_does_not_recurse_on_previous_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             manager = SettingsManager(Path(tmp_dir) / "settings.json")
@@ -96,6 +112,30 @@ class BugfixAndSecurityTests(unittest.TestCase):
 
         self.assertEqual("".join(chunks), "return\n  wf.vars.value")
         response.close.assert_called_once()
+
+    def test_llm_payload_carries_gpu_and_keepalive_runtime_options(self) -> None:
+        client = LLMClient(
+            Settings(
+                api_url="http://127.0.0.1:11434/api/chat",
+                gpu_layers=-1,
+                main_gpu=0,
+                cpu_threads=8,
+                keep_alive="2h",
+                low_vram=True,
+            )
+        )
+
+        payload = client._build_payload(
+            messages=[{"role": "user", "content": "test"}],
+            model="qwen2.5-coder:7b",
+            stream=False,
+        )
+
+        self.assertEqual(payload["keep_alive"], "2h")
+        self.assertEqual(payload["options"]["num_gpu"], -1)
+        self.assertEqual(payload["options"]["main_gpu"], 0)
+        self.assertEqual(payload["options"]["num_thread"], 8)
+        self.assertTrue(payload["options"]["low_vram"])
 
 
 if __name__ == "__main__":

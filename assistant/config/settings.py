@@ -35,6 +35,11 @@ class Settings:
     stream: bool = True
     show_logs: bool = True
     batch_size: int = 1
+    gpu_layers: int = -1
+    main_gpu: int = 0
+    cpu_threads: int = 0
+    keep_alive: str = "2h"
+    low_vram: bool = False
     assistant_profile: str = "localscript"
     agent_self_check_attempts: int = 3
     localscript_context_size: int = 4096
@@ -128,6 +133,10 @@ class SettingsManager:
             "ASSISTANT_MAX_REQUEST_BYTES": ("max_request_bytes", int),
             "ASSISTANT_MAX_IMAGE_SIZE_MB": ("max_image_size_mb", int),
             "ASSISTANT_BATCH_SIZE": ("batch_size", int),
+            "ASSISTANT_GPU_LAYERS": ("gpu_layers", int),
+            "ASSISTANT_MAIN_GPU": ("main_gpu", int),
+            "ASSISTANT_CPU_THREADS": ("cpu_threads", int),
+            "ASSISTANT_KEEP_ALIVE": ("keep_alive", str),
             "ASSISTANT_PROFILE": ("assistant_profile", str),
             "ASSISTANT_AGENT_SELF_CHECK_ATTEMPTS": ("agent_self_check_attempts", int),
             "ASSISTANT_LOCALSCRIPT_CONTEXT_SIZE": ("localscript_context_size", int),
@@ -146,6 +155,7 @@ class SettingsManager:
             "ASSISTANT_STREAM": "stream",
             "ASSISTANT_SHOW_LOGS": "show_logs",
             "ASSISTANT_LOCALSCRIPT_AUTO_VALIDATE": "localscript_auto_validate",
+            "ASSISTANT_LOW_VRAM": "low_vram",
         }
         for env_name, field_name in bool_map.items():
             raw_value = os.getenv(env_name)

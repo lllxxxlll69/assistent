@@ -567,11 +567,20 @@ class LocalScriptService:
         if has_explicit_context or has_code_context:
             return None
         if is_refine_without_code:
-            return "Пришлите текущий LocalScript-код или JSON-контекст, который нужно исправить или доработать."
+            return (
+                "Пришлите текущий LocalScript-код или короткий JSON-контекст "
+                "с `wf.vars` / `wf.initVariables`, который нужно исправить или доработать."
+            )
         if is_short and lacks_domain_signal:
-            return "Уточните задачу и пришлите пример входного контекста, чтобы сгенерировать корректный LocalScript."
+            return (
+                "Что именно должен делать LocalScript и какие данные приходят во `wf.vars` "
+                "или `wf.initVariables`? Пришлите короткий пример входного контекста."
+            )
         if asks_json and lacks_domain_signal:
-            return "Уточните, какие поля должны попасть в JSON, и пришлите workflow-контекст для LocalScript."
+            return (
+                "Какие поля нужно вернуть в JSON и из каких `wf.vars` / `wf.initVariables` "
+                "их брать? Пришлите короткий workflow-контекст."
+            )
         return None
 
     def _derive_assumptions(self, task: str, context_messages: Sequence[Message]) -> list[str]:

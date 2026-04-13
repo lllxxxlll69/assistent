@@ -95,6 +95,8 @@ vision_model = qwen3-vl:4b
 num_ctx = 4096
 num_predict = 256
 batch = 1
+num_gpu = -1
+keep_alive = 2h
 parallel = 1
 OLLAMA_NUM_PARALLEL = 1
 ```
@@ -346,4 +348,3 @@ docker compose up --build
 - [assistant/api/openapi.yaml](assistant/api/openapi.yaml)
 - [assistant/core/orchestrator.py](assistant/core/orchestrator.py)
 - [assistant/project_agent/service.py](assistant/project_agent/service.py)
-

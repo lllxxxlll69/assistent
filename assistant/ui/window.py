@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QTextEdit,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -58,6 +59,7 @@ from assistant.config.settings import Settings
 from assistant.local_chat.window import LocalChatWindow
 from assistant.llm.client import LLMClientError
 from assistant.models import AssistantResponse, utc_now_iso
+from .code_render import render_message_html
 
 
 COLORS = {
@@ -141,6 +143,42 @@ class AutoResizeTextEdit(QTextEdit):
         self.update_height()
 
 
+class RichMessageView(QTextBrowser):
+    def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._role = role
+        self._text = text
+        self.setReadOnly(True)
+        self.setOpenExternalLinks(False)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.document().setDocumentMargin(0)
+        self.setObjectName("messageTextView")
+        self.setProperty("messageType", role)
+        self.document().documentLayout().documentSizeChanged.connect(self._update_height)
+        self.set_content(text)
+
+    def set_content(self, text: str) -> None:
+        self._text = text
+        self.setHtml(render_message_html(text, self._role))
+        self._update_height()
+
+    def plain_text(self) -> str:
+        return self._text
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_height()
+
+    def _update_height(self, *_args) -> None:
+        self.document().setTextWidth(max(80, self.viewport().width()))
+        height = int(self.document().size().height()) + 8
+        self.setFixedHeight(max(24, height))
+
+
 class MessageBubble(QFrame):
     def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -165,11 +203,7 @@ class MessageBubble(QFrame):
         header_layout.addWidget(self.role_label)
         header_layout.addStretch(1)
 
-        self.text_label = QLabel(text)
-        self.text_label.setWordWrap(True)
-        self.text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.text_label.setObjectName("messageText")
-        self.text_label.setProperty("messageType", role)
+        self.text_label = RichMessageView(role=role, text=text)
 
         self.toggle_button: QPushButton | None = None
         self._thought_expanded = True
@@ -187,7 +221,7 @@ class MessageBubble(QFrame):
 
     def set_text(self, text: str) -> None:
         self._text = text
-        self.text_label.setText(text)
+        self.text_label.set_content(text)
 
     def append_text(self, chunk: str) -> None:
         self.set_text(self._text + chunk)
@@ -519,8 +553,16 @@ class SettingsDialog(QDialog):
         self.search_chunk_size_spin.setSingleStep(100)
         self.request_timeout_spin = QSpinBox()
         self.request_timeout_spin.setRange(10, 600)
+        self.gpu_layers_spin = QSpinBox()
+        self.gpu_layers_spin.setRange(-1, 999)
+        self.main_gpu_spin = QSpinBox()
+        self.main_gpu_spin.setRange(0, 16)
+        self.cpu_threads_spin = QSpinBox()
+        self.cpu_threads_spin.setRange(0, 128)
+        self.keep_alive_edit = QLineEdit()
         self.stream_check = QCheckBox("Показывать ответ по мере генерации")
         self.show_logs_check = QCheckBox("Показывать окно логов")
+        self.low_vram_check = QCheckBox("Включить low VRAM режим")
 
         generation_form.addRow("Temperature", self.temperature_spin)
         generation_form.addRow("Max tokens", self.max_tokens_spin)
@@ -530,8 +572,13 @@ class SettingsDialog(QDialog):
         generation_form.addRow("Search results", self.max_search_results_spin)
         generation_form.addRow("Chunk size", self.search_chunk_size_spin)
         generation_form.addRow("Timeout (sec)", self.request_timeout_spin)
+        generation_form.addRow("GPU layers", self.gpu_layers_spin)
+        generation_form.addRow("Main GPU", self.main_gpu_spin)
+        generation_form.addRow("CPU threads (0 = auto)", self.cpu_threads_spin)
+        generation_form.addRow("Keep alive", self.keep_alive_edit)
         generation_form.addRow("", self.stream_check)
         generation_form.addRow("", self.show_logs_check)
+        generation_form.addRow("", self.low_vram_check)
         layout.addWidget(generation_box)
 
         stats_box = QGroupBox("Память и контекст")
@@ -578,8 +625,13 @@ class SettingsDialog(QDialog):
         self.max_search_results_spin.setValue(settings.max_search_results)
         self.search_chunk_size_spin.setValue(settings.search_chunk_size)
         self.request_timeout_spin.setValue(settings.request_timeout)
+        self.gpu_layers_spin.setValue(settings.gpu_layers)
+        self.main_gpu_spin.setValue(settings.main_gpu)
+        self.cpu_threads_spin.setValue(settings.cpu_threads)
+        self.keep_alive_edit.setText(settings.keep_alive)
         self.stream_check.setChecked(settings.stream)
         self.show_logs_check.setChecked(settings.show_logs)
+        self.low_vram_check.setChecked(settings.low_vram)
 
     def _reset_form(self) -> None:
         answer = QMessageBox.question(
@@ -608,8 +660,13 @@ class SettingsDialog(QDialog):
             "max_search_results": self.max_search_results_spin.value(),
             "search_chunk_size": self.search_chunk_size_spin.value(),
             "request_timeout": self.request_timeout_spin.value(),
+            "gpu_layers": self.gpu_layers_spin.value(),
+            "main_gpu": self.main_gpu_spin.value(),
+            "cpu_threads": self.cpu_threads_spin.value(),
+            "keep_alive": self.keep_alive_edit.text().strip() or self.defaults.keep_alive,
             "stream": self.stream_check.isChecked(),
             "show_logs": self.show_logs_check.isChecked(),
+            "low_vram": self.low_vram_check.isChecked(),
         }
 
 
@@ -1132,8 +1189,11 @@ class AssistantWindow(QMainWindow):
                 font-size: 12px;
                 font-weight: 600;
             }}
-            QLabel#messageText {{
+            QTextBrowser#messageTextView {{
                 font-size: 15px;
+                background: transparent;
+                border: none;
+                padding: 0px;
             }}
             QLabel#assistantMetaLabel {{
                 color: {COLORS["muted"]};
@@ -1153,7 +1213,7 @@ class AssistantWindow(QMainWindow):
                 color: {COLORS["muted"]};
                 font-size: 11px;
             }}
-            QLabel#messageText[messageType="thought"] {{
+            QTextBrowser#messageTextView[messageType="thought"] {{
                 color: {COLORS["muted"]};
                 font-size: 13px;
             }}
