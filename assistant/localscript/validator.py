@@ -9,9 +9,11 @@ from assistant.localscript.semantic_checks import (
     code_handles_timezone_offset,
     extract_json_context,
     looks_like_iso8601_builder,
+    run_execution_probe,
     task_requires_timezone_aware_unix,
     verify_json_payload_shape,
 )
+from assistant.localscript.lua_sandbox import run_lua_hidden_task_probes
 from assistant.localscript.syntax_gate import run_syntax_gate
 from assistant.models import ValidationCheckResult, ValidationIssue, ValidationResult
 
@@ -66,7 +68,15 @@ class LuacCheckOutcome:
 
 
 class LocalScriptValidator:
-    def validate(self, task: str, candidate: str) -> ValidationResult:
+    def validate(
+        self,
+        task: str,
+        candidate: str,
+        *,
+        run_sandbox: bool = True,
+        sandbox_timeout_ms: int = 900,
+        sandbox_case_count: int = 2,
+    ) -> ValidationResult:
         raw_candidate = candidate or ""
         normalized_code = self.normalize(candidate)
         issues: list[ValidationIssue] = []
@@ -75,6 +85,10 @@ class LocalScriptValidator:
         luac_status = "skipped_with_reason"
         luac_detail = "luac not executed."
         syntax_engine = ""
+        execution_status = "skipped_with_reason"
+        execution_detail = "Execution probe not executed."
+        sandbox_status = "skipped_with_reason"
+        sandbox_detail = "Hidden-task sandbox was not executed."
 
         def pass_check(name: str, detail: str = "") -> None:
             checks.append(name)
@@ -98,6 +112,10 @@ class LocalScriptValidator:
                 luac_status="skipped_with_reason",
                 luac_detail="Empty normalized output.",
                 syntax_engine=syntax_engine,
+                execution_status=execution_status,
+                execution_detail=execution_detail,
+                sandbox_status=sandbox_status,
+                sandbox_detail=sandbox_detail,
             )
 
         pass_check("normalized_output", f"chars={len(normalized_code)}")
@@ -306,6 +324,10 @@ class LocalScriptValidator:
                 luac_status="skipped_with_reason",
                 luac_detail="No Lua blocks extracted.",
                 syntax_engine=syntax_engine,
+                execution_status=execution_status,
+                execution_detail=execution_detail,
+                sandbox_status=sandbox_status,
+                sandbox_detail=sandbox_detail,
             )
 
         pass_check("code_shape", f"blocks={len(lua_blocks)}")
@@ -336,6 +358,34 @@ class LocalScriptValidator:
             luac_detail = luac_outcomes[0].detail if luac_outcomes else "luac not executed."
             skip_check("luac_parse", luac_detail)
 
+        execution_probe = run_execution_probe(task, normalized_code)
+        execution_status = execution_probe.status
+        execution_detail = execution_probe.detail
+        if execution_probe.status == "failed":
+            fail_check("execution_probe", execution_probe.detail)
+        elif execution_probe.status == "passed":
+            pass_check("execution_probe", execution_probe.detail)
+        else:
+            skip_check("execution_probe", execution_probe.detail)
+
+        if run_sandbox and luac_status == "passed":
+            sandbox_probe = run_lua_hidden_task_probes(
+                task,
+                normalized_code,
+                timeout_ms=sandbox_timeout_ms,
+                max_cases=sandbox_case_count,
+            )
+            sandbox_status = sandbox_probe.status
+            sandbox_detail = sandbox_probe.detail
+            if sandbox_probe.status == "failed":
+                fail_check("sandbox_hidden_tasks", sandbox_probe.detail)
+            elif sandbox_probe.status == "passed":
+                pass_check("sandbox_hidden_tasks", sandbox_probe.detail)
+            else:
+                skip_check("sandbox_hidden_tasks", sandbox_probe.detail)
+        else:
+            skip_check("sandbox_hidden_tasks", "Sandbox execution disabled or syntax gate did not pass.")
+
         is_valid = not any(issue.severity == "error" for issue in issues)
         score, breakdown = self.score_with_breakdown(
             ValidationResult(
@@ -347,6 +397,10 @@ class LocalScriptValidator:
                 luac_status=luac_status,
                 luac_detail=luac_detail,
                 syntax_engine=syntax_engine,
+                execution_status=execution_status,
+                execution_detail=execution_detail,
+                sandbox_status=sandbox_status,
+                sandbox_detail=sandbox_detail,
             ),
             normalized_code,
         )
@@ -359,6 +413,10 @@ class LocalScriptValidator:
             luac_status=luac_status,
             luac_detail=luac_detail,
             syntax_engine=syntax_engine,
+            execution_status=execution_status,
+            execution_detail=execution_detail,
+            sandbox_status=sandbox_status,
+            sandbox_detail=sandbox_detail,
             score_breakdown={**breakdown, "total": score},
         )
 
@@ -381,6 +439,12 @@ class LocalScriptValidator:
             "info_penalty": -sum(6 for issue in validation.issues if issue.severity != "error"),
             "shape_bonus": 6 if normalized_code.lstrip().startswith(("return", "local", "{", "function", "if")) else 0,
             "luac": 12 if validation.luac_status == "passed" else (-16 if validation.luac_status == "failed" else -3),
+            "execution_probe": 18
+            if validation.execution_status == "passed"
+            else (-18 if validation.execution_status == "failed" else -2),
+            "sandbox_hidden_tasks": 22
+            if validation.sandbox_status == "passed"
+            else (-20 if validation.sandbox_status == "failed" else -3),
             "provenance": 4 if source == "repair" else 0,
             "repair_round": max(0, 6 - (repair_round * 2)),
             "length_penalty": -min(len(normalized_code) // 700, 8),

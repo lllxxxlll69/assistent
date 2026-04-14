@@ -127,6 +127,13 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(issue.rule == "iso_8601_shape" for issue in result.issues))
 
+    def test_execution_probe_passes_for_nested_direct_return(self) -> None:
+        task = 'Верни значение wf.vars.json.order.id как есть. {"wf":{"vars":{"json":{"order":{"id":"O-1"}}}}}'
+        result = self.validator.validate(task, "return wf.vars.json.order.id")
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.execution_status, "passed")
+        self.assertTrue(any(item.name == "execution_probe" and item.status == "passed" for item in result.check_results))
+
 
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
@@ -177,7 +184,7 @@ class LocalScriptServiceTests(unittest.TestCase):
                 allow_clarification=True,
             )
         self.assertIsNone(generation.clarification_question)
-        self.assertEqual(generation.selected_strategy, "baseline")
+        self.assertEqual(generation.selected_strategy, "context_repair")
 
     def test_selects_best_candidate_from_multiple_llm_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -268,6 +275,7 @@ class LocalScriptServiceTests(unittest.TestCase):
                 strategy="baseline",
                 assumptions=[],
                 feedback_hints=[],
+                conversation_guidance=[],
             )
         system_prompt = messages[0]["content"]
         self.assertIn("Internal self-check", system_prompt)
@@ -305,6 +313,52 @@ class LocalScriptServiceTests(unittest.TestCase):
         self.assertEqual(generation.selected_strategy, "symbolic")
         self.assertIn('"orderId":"lua{return wf.vars.orderId}lua"', generation.code)
         self.assertIn('"customerEmail":"lua{return wf.vars.customerEmail}lua"', generation.code)
+
+    def test_symbolic_candidate_supports_nested_direct_return_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            llm = StubLLMClient([])
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    'Return wf.initVariables.payload.customer.primaryEmail as is. {"wf":{"initVariables":{"payload":{"customer":{"primaryEmail":"a@example.com"}}}}}',
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertEqual(generation.selected_strategy, "symbolic")
+        self.assertEqual(generation.code, "return wf.initVariables.payload.customer.primaryEmail")
+        self.assertEqual(llm.requested_models, [])
+
+    def test_fast_path_stops_after_first_high_confidence_llm_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(localscript_candidate_count=3, localscript_repair_attempts=0, localscript_fast_path=True)
+            llm = StubLLMClient(
+                [
+                    "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result"
+                ]
+            )
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    "Очисти RESTbody result и оставь только ID, ENTITY_ID и CALL.",
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertEqual(generation.selected_strategy, "baseline")
+        self.assertEqual(generation.candidate_count, 1)
+        self.assertEqual(len(llm.requested_models), 1)
+
+    def test_validator_runs_hidden_task_sandbox_for_supported_family(self) -> None:
+        validator = LocalScriptValidator()
+        result = validator.validate(
+            'Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}',
+            "return wf.vars.orderId",
+        )
+        if result.sandbox_status == "skipped_with_reason":
+            self.skipTest(result.sandbox_detail)
+        self.assertEqual(result.sandbox_status, "passed")
+        self.assertTrue(any(item.name == "sandbox_hidden_tasks" and item.status == "passed" for item in result.check_results))
 
 
 class LocalScriptEvalTests(unittest.IsolatedAsyncioTestCase):

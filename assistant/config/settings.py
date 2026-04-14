@@ -15,13 +15,15 @@ DEFAULT_SETTINGS_PATH = DEFAULT_DATA_DIR / "settings.json"
 FIXED_CONTEXT_SIZE = 4096
 FIXED_NUM_PREDICT = 256
 FIXED_BATCH_SIZE = 1
+DEFAULT_CONTEST_MODEL = "qwen2.5-coder:7b"
+DEFAULT_VISION_MODEL = "qwen3-vl:4b"
 
 
 @dataclass(slots=True)
 class Settings:
-    model: str = "qwen2.5-coder:7b"
-    localscript_model: str = "qwen2.5-coder:7b"
-    vision_model: str = "qwen3-vl:4b"
+    model: str = DEFAULT_CONTEST_MODEL
+    localscript_model: str = DEFAULT_CONTEST_MODEL
+    vision_model: str = DEFAULT_VISION_MODEL
     api_url: str = os.getenv("ASSISTANT_API_URL", "http://127.0.0.1:11434/api/chat")
     temperature: float = 0.2
     localscript_temperature: float = 0.0
@@ -51,6 +53,11 @@ class Settings:
     localscript_auto_validate: bool = True
     localscript_repair_attempts: int = 2
     localscript_candidate_count: int = 3
+    localscript_fast_path: bool = True
+    localscript_strict_shortlist_size: int = 2
+    localscript_sandbox_enabled: bool = True
+    localscript_sandbox_timeout_ms: int = 900
+    localscript_hidden_case_count: int = 2
     localscript_runtime_guard: bool = True
     localscript_require_full_gpu: bool = True
     localscript_full_gpu_ratio: float = 0.98
@@ -158,6 +165,9 @@ class SettingsManager:
             "ASSISTANT_LOCALSCRIPT_NUM_PREDICT": ("localscript_num_predict", int),
             "ASSISTANT_LOCALSCRIPT_REPAIR_ATTEMPTS": ("localscript_repair_attempts", int),
             "ASSISTANT_LOCALSCRIPT_CANDIDATE_COUNT": ("localscript_candidate_count", int),
+            "ASSISTANT_LOCALSCRIPT_STRICT_SHORTLIST_SIZE": ("localscript_strict_shortlist_size", int),
+            "ASSISTANT_LOCALSCRIPT_SANDBOX_TIMEOUT_MS": ("localscript_sandbox_timeout_ms", int),
+            "ASSISTANT_LOCALSCRIPT_HIDDEN_CASE_COUNT": ("localscript_hidden_case_count", int),
             "ASSISTANT_LOCALSCRIPT_FULL_GPU_RATIO": ("localscript_full_gpu_ratio", float),
             "ASSISTANT_LOCALSCRIPT_MAX_VRAM_BYTES": ("localscript_max_vram_bytes", int),
             "ASSISTANT_LOCALSCRIPT_EXPECTED_DIGEST": ("localscript_expected_digest", str),
@@ -176,6 +186,8 @@ class SettingsManager:
             "ASSISTANT_LOW_VRAM": "low_vram",
             "ASSISTANT_LOCALSCRIPT_RUNTIME_GUARD": "localscript_runtime_guard",
             "ASSISTANT_LOCALSCRIPT_REQUIRE_FULL_GPU": "localscript_require_full_gpu",
+            "ASSISTANT_LOCALSCRIPT_FAST_PATH": "localscript_fast_path",
+            "ASSISTANT_LOCALSCRIPT_SANDBOX_ENABLED": "localscript_sandbox_enabled",
         }
         for env_name, field_name in bool_map.items():
             raw_value = os.getenv(env_name)

@@ -13,6 +13,7 @@ from assistant.llm.client import LLMClientError
 from assistant.localscript.eval_cases import get_eval_cases
 from assistant.localscript.evaluator import run_eval_suite
 from assistant.localscript.knowledge import find_exact_prompt_overlaps, find_semantic_prompt_overlaps
+from assistant.localscript.lua_sandbox import probe_lua_sandbox
 from assistant.localscript.runtime import RuntimeProbeError, build_runtime_constraints, probe_ollama_runtime
 from assistant.localscript.syntax_gate import probe_syntax_gate
 
@@ -54,6 +55,11 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             name="localscript_model_tag_locked",
             status=_status(":" in settings.localscript_model),
             detail=f"localscript_model={settings.localscript_model}",
+        ),
+        CheckResult(
+            name="model_tags_consistent",
+            status=_status(settings.model == settings.localscript_model),
+            detail=f"model={settings.model}, localscript_model={settings.localscript_model}",
         ),
         CheckResult(
             name="assistant_fixed_context_size",
@@ -152,6 +158,16 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
         )
     )
 
+    sandbox_probe = probe_lua_sandbox()
+    checks.append(
+        CheckResult(
+            name="lua_sandbox_available",
+            status=sandbox_probe.status,
+            detail=f"{sandbox_probe.engine}: {sandbox_probe.detail}" if sandbox_probe.engine else sandbox_probe.detail,
+            required=False,
+        )
+    )
+
     luac_path = shutil.which("luac")
     checks.append(
         CheckResult(
@@ -242,6 +258,10 @@ async def run_self_check(*, run_full_eval: bool = False) -> dict[str, object]:
             "localscript_num_predict": settings.localscript_num_predict,
             "batch_size": settings.batch_size,
             "assistant_profile": settings.assistant_profile,
+            "localscript_fast_path": settings.localscript_fast_path,
+            "localscript_sandbox_enabled": settings.localscript_sandbox_enabled,
+            "localscript_sandbox_timeout_ms": settings.localscript_sandbox_timeout_ms,
+            "localscript_hidden_case_count": settings.localscript_hidden_case_count,
             "localscript_runtime_guard": settings.localscript_runtime_guard,
             "localscript_require_full_gpu": settings.localscript_require_full_gpu,
             "localscript_full_gpu_ratio": settings.localscript_full_gpu_ratio,

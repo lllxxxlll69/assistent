@@ -89,3 +89,5 @@ paths:
                   selected_strategy: "baseline"
                   validation_errors: 0
                   candidate_count: 1
+                  execution_status: "passed"
+                  sandbox_status: "passed"
