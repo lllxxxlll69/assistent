@@ -156,6 +156,10 @@ class ValidationResult:
     luac_status: str = "skipped_with_reason"
     luac_detail: str = ""
     syntax_engine: str = ""
+    execution_status: str = "skipped_with_reason"
+    execution_detail: str = ""
+    sandbox_status: str = "skipped_with_reason"
+    sandbox_detail: str = ""
     score_breakdown: dict[str, int] = field(default_factory=dict)
 
 
@@ -177,6 +181,8 @@ class CandidateArtifact:
     checks: list[str] = field(default_factory=list)
     luac_status: str = "skipped_with_reason"
     syntax_engine: str = ""
+    execution_status: str = "skipped_with_reason"
+    sandbox_status: str = "skipped_with_reason"
     repair_round: int = 0
     score_breakdown: dict[str, int] = field(default_factory=dict)
 

@@ -457,6 +457,8 @@ class Orchestrator:
             "selected_strategy": generation.selected_strategy,
             "luac_status": generation.validation.luac_status,
             "syntax_engine": generation.validation.syntax_engine,
+            "execution_status": generation.validation.execution_status,
+            "sandbox_status": generation.validation.sandbox_status,
             "repair_attempts_used": generation.repair_attempts_used,
             "assumptions": list(generation.assumptions),
             "trace": [f"{item.stage}:{item.status}" for item in generation.trace],

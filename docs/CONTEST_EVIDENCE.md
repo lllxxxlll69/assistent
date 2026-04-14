@@ -96,9 +96,11 @@ Behavior:
 
 - clarification question in interactive mode
 - assumption capture in judged mode
+- context-aware refinement from the previous assistant code when the user gives corrective feedback
 - multi-candidate generation
 - ranking
 - repair loop over invalid or weak candidates
+- fast-path early stop once a high-confidence candidate is found
 
 ## 6. Validation evidence
 
@@ -116,9 +118,11 @@ Checks include:
 - JSON payload wrapper rules
 - array helper rules
 - mandatory local syntax gate via `luac` or bundled `luaparser`
+- deterministic execution probes for supported direct-return, last-element, increment, JSON-payload, and datetime families
+- optional sandboxed Lua execution against generated hidden task variants for supported families
 - stronger datetime semantic checks for ISO 8601 and timezone-aware unix conversion
 
-The validator is still not a full Lua interpreter, but the syntax gate is now reproducible locally even when `luac` is absent from `PATH`.
+The validator is still not a full Lua interpreter, but it now combines a reproducible syntax gate, narrow execution-style probes, and a real sandboxed Lua executor for hidden task variants on supported families, even when `luac` is absent from `PATH`.
 
 ## 7. Eval methodology and public eval integrity
 
@@ -136,6 +140,7 @@ The repo now includes:
 - an exact-overlap audit between public eval prompts and public knowledge prompts
 - a semantic-overlap audit between public eval prompts and the public knowledge guidance cards
 - a semantic case-match property in eval reports for the main task families
+- additional nested-path eval variants so the public benchmark is less tied to the public example phrasings
 
 These audits are surfaced in:
 

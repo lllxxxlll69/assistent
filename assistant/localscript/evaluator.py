@@ -212,6 +212,8 @@ async def run_eval_suite(
         by_strategy = Counter[str]()
         by_luac_status = Counter[str]()
         by_syntax_engine = Counter[str]()
+        by_execution_status = Counter[str]()
+        by_sandbox_status = Counter[str]()
         runtime_guard_results = Counter[str]()
         repair_attempts: list[int] = []
         assumption_counts: list[int] = []
@@ -271,6 +273,8 @@ async def run_eval_suite(
             by_strategy.update([result.selected_strategy or "unknown"])
             by_luac_status.update([str(response.metrics.get("luac_status", "unknown"))])
             by_syntax_engine.update([str(response.metrics.get("syntax_engine", "unknown"))])
+            by_execution_status.update([str(response.metrics.get("execution_status", "unknown"))])
+            by_sandbox_status.update([str(response.metrics.get("sandbox_status", "unknown"))])
             runtime_info = response.metrics.get("runtime_info")
             if isinstance(runtime_info, dict) and runtime_info:
                 runtime_guard_results.update(["present"])
@@ -299,6 +303,8 @@ async def run_eval_suite(
             "pass_rate": round((passed / total) * 100, 2) if total else 0.0,
             "luac_status_distribution": dict(by_luac_status),
             "syntax_engine_distribution": dict(by_syntax_engine),
+            "execution_status_distribution": dict(by_execution_status),
+            "sandbox_status_distribution": dict(by_sandbox_status),
             "selected_strategy_distribution": dict(by_strategy),
             "runtime_guard_distribution": dict(runtime_guard_results),
             "knowledge_eval_overlap": {

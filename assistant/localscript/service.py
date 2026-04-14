@@ -31,6 +31,16 @@ from assistant.models import (
 
 
 REFINE_MARKERS = ("доработ", "исправ", "дополни", "улучши", "fix", "improve", "update")
+REFINEMENT_FEEDBACK_MARKERS = (
+    "не так",
+    "неверн",
+    "ошиб",
+    "не подходит",
+    "без ",
+    "without ",
+    "нужно ",
+    "должен ",
+)
 JSON_RESULT_PHRASES = (
     "json payload",
     "json-payload",
@@ -181,6 +191,16 @@ class LocalScriptService:
                 trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
 
         settings = self.settings_manager.get_settings()
+        conversation_guidance = self._conversation_guidance(task, context_messages)
+        if conversation_guidance:
+            trace.append(
+                GenerationTraceEntry(
+                    stage="feedback_synthesized",
+                    status="applied",
+                    detail=f"constraints={len(conversation_guidance)}",
+                )
+            )
+            logs.append(ActionLogEntry(message=f"Собраны активные ограничения диалога: {len(conversation_guidance)}"))
         if interaction_mode == "judged" and settings.localscript_runtime_guard:
             runtime_info = self._ensure_judged_runtime(settings)
             logs.append(
@@ -205,7 +225,14 @@ class LocalScriptService:
         candidates: list[_Candidate] = []
         symbolic_candidate = self._build_symbolic_candidate(task)
         if symbolic_candidate is not None:
-            candidate = self._build_candidate(task=task, label="symbolic", source="symbolic", raw_response=symbolic_candidate)
+            candidate = self._build_candidate(
+                task=task,
+                label="symbolic",
+                source="symbolic",
+                raw_response=symbolic_candidate,
+                settings=settings,
+                run_sandbox=False,
+            )
             candidates.append(candidate)
             candidate_reports.append(self._to_candidate_artifact(candidate))
             logs.append(
@@ -225,11 +252,16 @@ class LocalScriptService:
                 )
             )
             if interaction_mode == "judged" and candidate.validation.is_valid:
+                candidate = self._revalidate_candidate(task=task, candidate=candidate, settings=settings, run_sandbox=True)
+                self._sync_candidate_artifact(candidate_reports, candidate)
                 trace.append(
                     GenerationTraceEntry(
                         stage="final_selected",
                         status="passed",
-                        detail="source=symbolic, repairs=0",
+                        detail=(
+                            "source=symbolic, repairs=0, "
+                            f"sandbox={candidate.validation.sandbox_status}"
+                        ),
                     )
                 )
                 return LocalScriptGeneration(
@@ -248,7 +280,69 @@ class LocalScriptService:
                 )
 
         feedback_hints = self._feedback_hints()
-        labels = self._candidate_labels(task, settings.localscript_candidate_count)
+        context_repair_candidate = self._build_context_repair_candidate(
+            task=task,
+            context_messages=context_messages,
+            assumptions=assumptions,
+            settings=settings,
+            conversation_guidance=conversation_guidance,
+        )
+        if context_repair_candidate is not None:
+            candidates.append(context_repair_candidate)
+            candidate_reports.append(self._to_candidate_artifact(context_repair_candidate))
+            logs.append(
+                ActionLogEntry(
+                    message=(
+                        "Собран refinement-кандидат из предыдущего ответа "
+                        f"(score={context_repair_candidate.score}, valid={context_repair_candidate.validation.is_valid}, "
+                        f"luac={context_repair_candidate.validation.luac_status})"
+                    ),
+                    success=context_repair_candidate.validation.is_valid,
+                )
+            )
+            trace.append(
+                GenerationTraceEntry(
+                    stage="context_repair_generated",
+                    status="candidate_ready",
+                    detail=(
+                        f"context_repair: score={context_repair_candidate.score}, "
+                        f"valid={context_repair_candidate.validation.is_valid}"
+                    ),
+                )
+            )
+            if settings.localscript_fast_path and self._is_high_confidence_candidate(context_repair_candidate):
+                context_repair_candidate = self._revalidate_candidate(
+                    task=task,
+                    candidate=context_repair_candidate,
+                    settings=settings,
+                    run_sandbox=True,
+                )
+                self._sync_candidate_artifact(candidate_reports, context_repair_candidate)
+                trace.append(
+                    GenerationTraceEntry(
+                        stage="fast_path_selected",
+                        status="passed",
+                        detail="context_repair candidate satisfied the fast-path threshold.",
+                    )
+                )
+                return LocalScriptGeneration(
+                    code=context_repair_candidate.validation.normalized_code,
+                    validation=context_repair_candidate.validation,
+                    logs=logs + self._validation_issue_logs(context_repair_candidate.validation),
+                    clarification_question=None,
+                    raw_response=context_repair_candidate.raw_response,
+                    selected_strategy=context_repair_candidate.label,
+                    candidate_count=len(candidates),
+                    assumptions=assumptions,
+                    trace=trace,
+                    candidate_reports=candidate_reports,
+                    repair_attempts_used=repair_attempts_used,
+                    runtime_info=runtime_info,
+                )
+
+        labels = self._candidate_labels(task, settings.localscript_candidate_count, has_feedback=bool(conversation_guidance))
+        if context_repair_candidate is not None and settings.localscript_candidate_count <= 1:
+            labels = []
         trace.append(GenerationTraceEntry(stage="llm_cycle_started", status="running", detail=f"candidate_count={len(labels)}"))
 
         for label in labels:
@@ -258,8 +352,17 @@ class LocalScriptService:
                 strategy=label,
                 assumptions=assumptions,
                 feedback_hints=feedback_hints,
+                conversation_guidance=conversation_guidance,
+                settings=settings,
             )
-            candidate = self._build_candidate(task=task, label=label, source="llm", raw_response=raw_response)
+            candidate = self._build_candidate(
+                task=task,
+                label=label,
+                source="llm",
+                raw_response=raw_response,
+                settings=settings,
+                run_sandbox=False,
+            )
             candidates.append(candidate)
             candidate_reports.append(self._to_candidate_artifact(candidate))
             logs.append(
@@ -278,6 +381,15 @@ class LocalScriptService:
                     detail=f"{label}: score={candidate.score}, valid={candidate.validation.is_valid}",
                 )
             )
+            if settings.localscript_fast_path and self._is_high_confidence_candidate(candidate):
+                trace.append(
+                    GenerationTraceEntry(
+                        stage="fast_path_triggered",
+                        status="passed",
+                        detail=f"{label}: stopped after first high-confidence candidate.",
+                    )
+                )
+                break
 
         best_candidate = self._select_best_candidate(candidates)
         logs.append(ActionLogEntry(message=f"Предварительно выбрана стратегия LocalScript '{best_candidate.label}'."))
@@ -293,6 +405,8 @@ class LocalScriptService:
                         validation=current.validation,
                         context_messages=context_messages,
                         assumptions=assumptions,
+                        conversation_guidance=conversation_guidance,
+                        settings=settings,
                     )
                     repaired = self._build_candidate(
                         task=task,
@@ -300,6 +414,8 @@ class LocalScriptService:
                         source="repair",
                         raw_response=repaired_raw,
                         repair_round=attempt,
+                        settings=settings,
+                        run_sandbox=False,
                     )
                     candidates.append(repaired)
                     candidate_reports.append(self._to_candidate_artifact(repaired))
@@ -325,7 +441,47 @@ class LocalScriptService:
                         break
                     current = repaired
 
+        candidates = self._strictly_validate_shortlist(
+            task=task,
+            candidates=candidates,
+            candidate_reports=candidate_reports,
+            settings=settings,
+            trace=trace,
+        )
         best_candidate = self._select_best_candidate(candidates)
+        if settings.localscript_auto_validate and not best_candidate.validation.is_valid and best_candidate.validation.sandbox_status == "failed":
+            repair_attempts_used += 1
+            repaired_raw = self._repair(
+                task=task,
+                candidate_code=best_candidate.validation.normalized_code,
+                validation=best_candidate.validation,
+                context_messages=context_messages,
+                assumptions=assumptions,
+                conversation_guidance=conversation_guidance,
+                settings=settings,
+            )
+            sandbox_repair = self._build_candidate(
+                task=task,
+                label=f"{best_candidate.label}_sandbox_repair",
+                source="repair",
+                raw_response=repaired_raw,
+                repair_round=1,
+                settings=settings,
+                run_sandbox=True,
+            )
+            candidates.append(sandbox_repair)
+            candidate_reports.append(self._to_candidate_artifact(sandbox_repair))
+            trace.append(
+                GenerationTraceEntry(
+                    stage="sandbox_repaired",
+                    status="candidate_ready",
+                    detail=(
+                        f"{sandbox_repair.label}: score={sandbox_repair.score}, "
+                        f"valid={sandbox_repair.validation.is_valid}"
+                    ),
+                )
+            )
+            best_candidate = self._select_best_candidate(candidates)
         validation = best_candidate.validation
         logs.append(ActionLogEntry(message=f"Выбрана финальная стратегия LocalScript '{best_candidate.label}'.")) 
         logs.extend(self._validation_issue_logs(validation))
@@ -371,8 +527,16 @@ class LocalScriptService:
         source: str,
         raw_response: str,
         repair_round: int = 0,
+        settings=None,
+        run_sandbox: bool = True,
     ) -> _Candidate:
-        validation = self.validator.validate(task, raw_response)
+        validation = self.validator.validate(
+            task,
+            raw_response,
+            run_sandbox=run_sandbox,
+            sandbox_timeout_ms=getattr(settings, "localscript_sandbox_timeout_ms", 900),
+            sandbox_case_count=getattr(settings, "localscript_hidden_case_count", 2),
+        )
         score, breakdown = self.validator.score_with_breakdown(
             validation,
             validation.normalized_code,
@@ -401,6 +565,8 @@ class LocalScriptService:
             checks=list(candidate.validation.checks),
             luac_status=candidate.validation.luac_status,
             syntax_engine=candidate.validation.syntax_engine,
+            execution_status=candidate.validation.execution_status,
+            sandbox_status=candidate.validation.sandbox_status,
             repair_round=candidate.repair_round,
             score_breakdown=dict(candidate.score_breakdown),
         )
@@ -414,9 +580,11 @@ class LocalScriptService:
             if issue.severity != "info"
         ]
 
-    def _candidate_labels(self, task: str, candidate_count: int) -> list[str]:
+    def _candidate_labels(self, task: str, candidate_count: int, *, has_feedback: bool = False) -> list[str]:
         family = self._task_family(task)
         labels: list[str] = ["baseline"]
+        if has_feedback:
+            labels.append("feedback_strict")
         if family in {"selection_last", "increment", "datetime_unix", "datetime_iso", "direct_return"}:
             labels.append("return_first")
         if family in {"rest_cleanup", "array_filter", "array_helpers"}:
@@ -460,21 +628,21 @@ class LocalScriptService:
         context = self._extract_json_context(task)
         if not context:
             return None
-        wf_payload = context.get("wf")
-        if not isinstance(wf_payload, dict):
-            return None
-        candidates: list[str] = []
-        vars_payload = wf_payload.get("vars")
-        if isinstance(vars_payload, dict):
-            candidates.extend(f"wf.vars.{key}" for key in vars_payload.keys())
-        init_payload = wf_payload.get("initVariables")
-        if isinstance(init_payload, dict):
-            candidates.extend(f"wf.initVariables.{key}" for key in init_payload.keys())
+        candidates = self._workflow_paths_from_context(context)
         if len(candidates) == 1:
             return candidates[0]
         lowered = task.lower()
-        matched = [path for path in candidates if path.split(".")[-1].lower() in lowered]
-        return matched[0] if len(matched) == 1 else None
+        exact_path_matches = [path for path in candidates if path.lower() in lowered]
+        if len(exact_path_matches) == 1:
+            return exact_path_matches[0]
+        leaf_matches = [path for path in candidates if path.split(".")[-1].lower() in lowered]
+        if len(leaf_matches) == 1:
+            return leaf_matches[0]
+        if exact_path_matches:
+            exact_leafs = {path.split(".")[-1] for path in exact_path_matches}
+            if len(exact_leafs) == 1:
+                return sorted(exact_path_matches, key=len)[-1]
+        return None
 
     def _build_symbolic_unix_time_candidate(self, task: str) -> str | None:
         recall_time_required = "wf.initvariables.recalltime" in task.lower() or "recalltime" in task.lower()
@@ -534,14 +702,16 @@ class LocalScriptService:
         strategy: str,
         assumptions: Sequence[str],
         feedback_hints: Sequence[str],
+        conversation_guidance: Sequence[str],
+        settings,
     ) -> str:
-        settings = self.settings_manager.get_settings()
         messages = self._build_generation_messages(
             task,
             context_messages=context_messages,
             strategy=strategy,
             assumptions=assumptions,
             feedback_hints=feedback_hints,
+            conversation_guidance=conversation_guidance,
         )
         return self.llm_client.chat(
             messages,
@@ -560,13 +730,17 @@ class LocalScriptService:
         validation: ValidationResult,
         context_messages: Sequence[Message],
         assumptions: Sequence[str],
+        conversation_guidance: Sequence[str],
+        settings,
     ) -> str:
-        settings = self.settings_manager.get_settings()
         top_errors = validation.issues[:5]
         issues_text = "\n".join(f"- [{issue.rule}] {issue.message}" for issue in top_errors) or "- No issues."
         assumptions_block = ""
         if assumptions:
             assumptions_block = "Assumptions:\n" + "\n".join(f"- {item}" for item in assumptions) + "\n\n"
+        guidance_block = ""
+        if conversation_guidance:
+            guidance_block = "Active conversation constraints:\n" + "\n".join(f"- {item}" for item in conversation_guidance) + "\n\n"
         reference_examples = self.knowledge_base.render_examples(task, limit=1)
         messages = [
             {
@@ -586,6 +760,7 @@ class LocalScriptService:
                 "role": "user",
                 "content": (
                     f"{assumptions_block}"
+                    f"{guidance_block}"
                     "Original task:\n"
                     f"{task}\n\n"
                     "Reference shape for a similar task:\n"
@@ -616,6 +791,7 @@ class LocalScriptService:
         strategy: str,
         assumptions: Sequence[str],
         feedback_hints: Sequence[str],
+        conversation_guidance: Sequence[str] = (),
     ) -> list[dict[str, str]]:
         guidance = self.knowledge_base.render_generation_guidance(task, limit=3)
         examples = self.knowledge_base.render_examples(task, limit=2)
@@ -624,6 +800,8 @@ class LocalScriptService:
             optional_blocks.append("Assumptions:\n" + "\n".join(f"- {item}" for item in assumptions))
         if feedback_hints:
             optional_blocks.append("Recent negative user feedback patterns:\n" + "\n".join(f"- {item}" for item in feedback_hints))
+        if conversation_guidance:
+            optional_blocks.append("Active conversation constraints:\n" + "\n".join(f"- {item}" for item in conversation_guidance))
 
         system_prompt = "\n\n".join(
             [
@@ -711,6 +889,11 @@ class LocalScriptService:
                 "Strategy: prepare an answer that passes quality-gate checks. "
                 "Avoid markdown, placeholders, debug prints, and sample literals from prompt examples."
             )
+        if strategy == "feedback_strict":
+            return (
+                "Strategy: treat the latest user correction as binding feedback. "
+                "Preserve the previous intent, patch only the mismatched behavior, and avoid reintroducing prior mistakes."
+            )
         return (
             "Strategy: build the solution from the current task and context only. "
             "Do not rely on canned templates or placeholder scaffolding."
@@ -774,6 +957,7 @@ class LocalScriptService:
             candidates,
             key=lambda item: (
                 item.validation.is_valid,
+                item.validation.sandbox_status == "passed",
                 item.validation.luac_status == "passed",
                 item.score,
                 len(item.validation.checks),
@@ -794,6 +978,145 @@ class LocalScriptService:
         )
         invalid = [item for item in ranked if not item.validation.is_valid]
         return invalid[:2]
+
+    def _revalidate_candidate(self, *, task: str, candidate: _Candidate, settings, run_sandbox: bool) -> _Candidate:
+        refreshed = self._build_candidate(
+            task=task,
+            label=candidate.label,
+            source=candidate.source,
+            raw_response=candidate.raw_response,
+            repair_round=candidate.repair_round,
+            settings=settings,
+            run_sandbox=run_sandbox,
+        )
+        candidate.validation = refreshed.validation
+        candidate.score = refreshed.score
+        candidate.score_breakdown = refreshed.score_breakdown
+        return candidate
+
+    def _strictly_validate_shortlist(
+        self,
+        *,
+        task: str,
+        candidates: list[_Candidate],
+        candidate_reports: list[CandidateArtifact],
+        settings,
+        trace: list[GenerationTraceEntry],
+    ) -> list[_Candidate]:
+        shortlist_size = max(1, settings.localscript_strict_shortlist_size)
+        shortlist = [
+            item
+            for item in sorted(
+                candidates,
+                key=lambda candidate: (
+                    candidate.validation.is_valid,
+                    candidate.validation.execution_status == "passed",
+                    candidate.validation.luac_status == "passed",
+                    candidate.score,
+                ),
+                reverse=True,
+            )
+            if item.validation.luac_status == "passed"
+        ][:shortlist_size]
+        for candidate in shortlist:
+            self._revalidate_candidate(task=task, candidate=candidate, settings=settings, run_sandbox=settings.localscript_sandbox_enabled)
+            self._sync_candidate_artifact(candidate_reports, candidate)
+            trace.append(
+                GenerationTraceEntry(
+                    stage="sandbox_validated",
+                    status=candidate.validation.sandbox_status,
+                    detail=f"{candidate.label}: sandbox={candidate.validation.sandbox_status}",
+                )
+            )
+        return candidates
+
+    def _sync_candidate_artifact(self, candidate_reports: list[CandidateArtifact], candidate: _Candidate) -> None:
+        for index, artifact in enumerate(candidate_reports):
+            if artifact.label == candidate.label:
+                candidate_reports[index] = self._to_candidate_artifact(candidate)
+                return
+
+    def _is_high_confidence_candidate(self, candidate: _Candidate) -> bool:
+        return (
+            candidate.validation.is_valid
+            and candidate.validation.luac_status == "passed"
+            and candidate.validation.execution_status != "failed"
+            and not candidate.validation.issues
+        )
+
+    def _recent_assistant_code(self, context_messages: Sequence[Message]) -> str | None:
+        for message in reversed(context_messages):
+            if message.role == "assistant" and self._looks_like_code(message.content):
+                return message.content
+        return None
+
+    def _should_use_context_repair(self, task: str, context_messages: Sequence[Message]) -> bool:
+        if not self._recent_assistant_code(context_messages):
+            return False
+        lowered = task.casefold()
+        if any(marker in lowered for marker in REFINE_MARKERS):
+            return True
+        return any(
+            message.role == "user" and any(marker in message.content.casefold() for marker in REFINEMENT_FEEDBACK_MARKERS)
+            for message in context_messages[-4:]
+        )
+
+    def _conversation_guidance(self, task: str, context_messages: Sequence[Message]) -> list[str]:
+        guidance: list[str] = []
+        lowered = task.casefold()
+        if self._recent_assistant_code(context_messages):
+            guidance.append("There is previous assistant code in the dialog; preserve working parts and patch only the mismatched behavior.")
+        if "print(" in lowered or "без print" in lowered or "no print" in lowered:
+            guidance.append("Do not use print() in the final judged answer.")
+        if "initvariables" in lowered:
+            guidance.append("Prefer wf.initVariables for the requested data path.")
+        if any(phrase in lowered for phrase in JSON_RESULT_PHRASES):
+            guidance.append("Return only the requested JSON payload fields and keep executable Lua values wrapped.")
+        for message in context_messages[-4:]:
+            if message.role != "user":
+                continue
+            feedback = message.content.strip()
+            feedback_lower = feedback.casefold()
+            if any(marker in feedback_lower for marker in REFINEMENT_FEEDBACK_MARKERS):
+                guidance.append("Latest user correction: " + feedback[:160])
+        deduplicated: list[str] = []
+        for item in guidance:
+            if item not in deduplicated:
+                deduplicated.append(item)
+        return deduplicated[:4]
+
+    def _build_context_repair_candidate(
+        self,
+        *,
+        task: str,
+        context_messages: Sequence[Message],
+        assumptions: Sequence[str],
+        settings,
+        conversation_guidance: Sequence[str],
+    ) -> _Candidate | None:
+        if not self._should_use_context_repair(task, context_messages):
+            return None
+        existing_code = self._recent_assistant_code(context_messages)
+        if existing_code is None:
+            return None
+        existing_validation = self.validator.validate(task, existing_code, run_sandbox=False)
+        refined_raw = self._repair(
+            task=task,
+            candidate_code=existing_validation.normalized_code or existing_code,
+            validation=existing_validation,
+            context_messages=context_messages,
+            assumptions=assumptions,
+            conversation_guidance=conversation_guidance,
+            settings=settings,
+        )
+        return self._build_candidate(
+            task=task,
+            label="context_repair",
+            source="repair",
+            raw_response=refined_raw,
+            settings=settings,
+            run_sandbox=False,
+        )
 
     def _build_clarification_question(self, task: str, context_messages: Sequence[Message]) -> str | None:
         lowered = task.lower()
@@ -939,6 +1262,29 @@ class LocalScriptService:
         if not parts:
             return "JSON context found, but wf.vars and wf.initVariables are empty."
         return "\n".join(parts)
+
+    def _workflow_paths_from_context(self, context: dict[str, Any]) -> list[str]:
+        wf_payload = context.get("wf")
+        if not isinstance(wf_payload, dict):
+            return []
+
+        candidates: list[str] = []
+        vars_payload = wf_payload.get("vars")
+        if isinstance(vars_payload, dict):
+            candidates.extend(self._collect_workflow_paths(vars_payload, "wf.vars"))
+        init_payload = wf_payload.get("initVariables")
+        if isinstance(init_payload, dict):
+            candidates.extend(self._collect_workflow_paths(init_payload, "wf.initVariables"))
+        return candidates
+
+    def _collect_workflow_paths(self, value: Any, prefix: str) -> list[str]:
+        if isinstance(value, dict):
+            collected: list[str] = []
+            for key, nested in value.items():
+                child_prefix = f"{prefix}.{key}"
+                collected.extend(self._collect_workflow_paths(nested, child_prefix))
+            return collected or [prefix]
+        return [prefix]
 
     def _extract_json_context(self, task: str) -> dict[str, Any] | None:
         return extract_json_context(task)

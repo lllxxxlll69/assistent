@@ -54,6 +54,15 @@ FULL_EVAL_CASES: tuple[EvalCase, ...] = (
         property_checks=("validation_passed", "contains_return", "uses_init_variables"),
     ),
     EvalCase(
+        id="last_nested_step_id",
+        category="selection_last",
+        difficulty="hard",
+        prompt='Верни последний stepId из wf.vars.audit.steps. {"wf":{"vars":{"audit":{"steps":["s1","s2","s3"]}}}}',
+        required_substrings=("wf.vars.audit.steps", "#wf.vars.audit.steps"),
+        property_checks=("validation_passed", "contains_return", "uses_wf_vars"),
+        notes="Nested workflow array path to reduce prompt memorization.",
+    ),
+    EvalCase(
         id="increment_try_count_smoke",
         category="increment",
         difficulty="easy",
@@ -85,6 +94,15 @@ FULL_EVAL_CASES: tuple[EvalCase, ...] = (
         prompt='Increase attempts counter. {"wf":{"vars":{"attempts":1}}}',
         required_substrings=("wf.vars.attempts", "+ 1"),
         property_checks=("validation_passed", "contains_return", "uses_wf_vars"),
+    ),
+    EvalCase(
+        id="increment_nested_retry_budget",
+        category="increment",
+        difficulty="hard",
+        prompt='Increment wf.vars.metrics.retryBudget by one. {"wf":{"vars":{"metrics":{"retryBudget":4}}}}',
+        required_substrings=("wf.vars.metrics.retryBudget", "+ 1"),
+        property_checks=("validation_passed", "contains_return", "uses_wf_vars"),
+        notes="Nested numeric path for symbolic increment coverage.",
     ),
     EvalCase(
         id="rest_cleanup_smoke",
@@ -217,6 +235,14 @@ FULL_EVAL_CASES: tuple[EvalCase, ...] = (
         property_checks=("validation_passed", "json_payload_wrapped", "uses_wf_vars"),
     ),
     EvalCase(
+        id="selected_init_json_fields",
+        category="json_payload",
+        difficulty="medium",
+        prompt='Return JSON payload with fields sourceSystem and recallTime. {"wf":{"initVariables":{"sourceSystem":"sap","recallTime":"2024-01-20T09:10:11+03:00"}}}',
+        required_substrings=('"sourceSystem":"lua{', '"recallTime":"lua{'),
+        property_checks=("validation_passed", "json_payload_wrapped", "uses_init_variables"),
+    ),
+    EvalCase(
         id="unix_time_smoke",
         category="datetime_unix",
         difficulty="medium",
@@ -264,6 +290,14 @@ FULL_EVAL_CASES: tuple[EvalCase, ...] = (
         prompt='Верни значение wf.vars.json.order.id как есть. {"wf":{"vars":{"json":{"order":{"id":"O-1"}}}}}',
         required_substrings=("return wf.vars.json.order.id",),
         property_checks=("validation_passed", "contains_return", "uses_wf_vars"),
+    ),
+    EvalCase(
+        id="return_nested_init_path",
+        category="direct_return",
+        difficulty="hard",
+        prompt='Return wf.initVariables.payload.customer.primaryEmail as is. {"wf":{"initVariables":{"payload":{"customer":{"primaryEmail":"a@example.com"}}}}}',
+        required_substrings=("return wf.initVariables.payload.customer.primaryEmail",),
+        property_checks=("validation_passed", "contains_return", "uses_init_variables"),
     ),
     EvalCase(
         id="judged_assumption_without_context",
