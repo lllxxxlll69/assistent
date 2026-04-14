@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from assistant.config.settings import SettingsManager
@@ -134,6 +135,19 @@ class LocalScriptValidatorTests(unittest.TestCase):
         self.assertEqual(result.execution_status, "passed")
         self.assertTrue(any(item.name == "execution_probe" and item.status == "passed" for item in result.check_results))
 
+    def test_rejects_natural_language_explanation_wrapped_in_return(self) -> None:
+        task = 'Верни orderId из workflow контекста. {"wf":{"vars":{"orderId":"123"}}}'
+        code = 'return "Я могу возвращать значения из workflow переменных и выполнять простые операции."'
+        result = self.validator.validate(task, code)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule == "natural_language_return" for issue in result.issues))
+
+    def test_rejects_lazy_generic_result_passthrough_for_transform_task(self) -> None:
+        task = 'Преобразуй result в нормализованный массив и верни итог. {"wf":{"vars":{"result":["a","b"]}}}'
+        result = self.validator.validate(task, "return wf.vars.result")
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(issue.rule == "generic_passthrough" for issue in result.issues))
+
 
 class LocalScriptKnowledgeTests(unittest.TestCase):
     def test_selects_relevant_examples(self) -> None:
@@ -185,6 +199,44 @@ class LocalScriptServiceTests(unittest.TestCase):
             )
         self.assertIsNone(generation.clarification_question)
         self.assertEqual(generation.selected_strategy, "context_repair")
+
+    def test_does_not_treat_generic_new_task_as_refinement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(localscript_candidate_count=1, localscript_repair_attempts=0, localscript_fast_path=True)
+            llm = StubLLMClient(
+                [
+                    "local result = wf.vars.RESTbody.result\nfor _, filtered_entry in pairs(result) do\n    for key, _ in pairs(filtered_entry) do\n        if key ~= \"ID\" and key ~= \"ENTITY_ID\" and key ~= \"CALL\" then\n            filtered_entry[key] = nil\n        end\n    end\nend\nreturn result"
+                ]
+            )
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch.object(service, "_ensure_judged_runtime", return_value={"loaded_models_count": 1, "warm_up_seconds": 0.0}):
+                generation = service.generate(
+                    "Нужно очистить RESTbody result и оставить только ID, ENTITY_ID и CALL.",
+                    context_messages=[Message(role="assistant", content="return wf.vars.emails[1]")],
+                    allow_clarification=False,
+                    interaction_mode="judged",
+                )
+        self.assertEqual(generation.selected_strategy, "baseline")
+        self.assertNotEqual(generation.selected_strategy, "context_repair")
+
+    def test_direct_return_family_is_not_triggered_for_generic_result_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient([]))
+
+            family = service._task_family('Верни результат после обработки. {"wf":{"vars":{"result":"123"}}}')
+
+        self.assertEqual(family, "generic")
+
+    def test_direct_return_family_keeps_explicit_generic_path_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            service = LocalScriptService(settings_manager=manager, llm_client=StubLLMClient([]))
+
+            family = service._task_family('Верни значение wf.vars.result как есть. {"wf":{"vars":{"result":"123"}}}')
+
+        self.assertEqual(family, "direct_return")
 
     def test_selects_best_candidate_from_multiple_llm_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -264,6 +316,31 @@ class LocalScriptServiceTests(unittest.TestCase):
                 )
         self.assertIn("wf.vars.RESTbody.result", generation.code)
         self.assertEqual(llm.requested_models, ["contest-model:1b"])
+
+    def test_interactive_generation_falls_back_to_chat_model_when_localscript_model_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manager = SettingsManager(Path(tmp_dir) / "settings.json")
+            manager.update_settings(
+                model="chat-model:3b",
+                localscript_model="missing-model:7b",
+                localscript_candidate_count=1,
+                localscript_repair_attempts=0,
+            )
+            llm = StubLLMClient(["return wf.vars.orderId"])
+            service = LocalScriptService(settings_manager=manager, llm_client=llm)
+            with patch(
+                "assistant.localscript.service.list_installed_ollama_models",
+                return_value=[SimpleNamespace(name="chat-model:3b")],
+            ):
+                generation = service.generate(
+                    'Используй workflow контекст и вытащи orderId. {"wf":{"vars":{"orderId":"123"}}}',
+                    allow_clarification=False,
+                    interaction_mode="interactive",
+                )
+
+        self.assertEqual(generation.code, "return wf.vars.orderId")
+        self.assertEqual(llm.requested_models, ["chat-model:3b"])
+        self.assertTrue(any("использую chat-model:3b" in item.message.lower() for item in generation.logs))
 
     def test_generation_prompt_includes_self_check_and_reference_examples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from time import perf_counter
 from typing import Any, AsyncIterator, Iterable
 
@@ -208,9 +209,10 @@ class LLMClient:
         context_size_override: int | None = None,
         temperature_override: float | None = None,
     ) -> str:
+        vision_model = model or self.settings.vision_model
         payload = self._build_payload(
             messages=[{"role": "user", "content": prompt, "images": [image_base64]}],
-            model=model or self.settings.vision_model,
+            model=vision_model,
             stream=False,
             max_tokens_override=max_tokens_override,
             context_size_override=context_size_override,
@@ -234,9 +236,16 @@ class LLMClient:
             raise LLMClientError("Vision endpoint returned invalid JSON.") from exc
 
         content = self._extract_content(data)
-        if content is None or not content.strip():
-            raise LLMClientError(f"Vision model {model or self.settings.vision_model} returned an empty response.")
-        return content.strip()
+        if content is not None and content.strip():
+            return content.strip()
+
+        thinking = self._extract_thinking(data)
+        if thinking:
+            recovered = self._recover_vision_response(prompt, thinking, vision_model=vision_model)
+            if recovered and recovered.strip():
+                return recovered.strip()
+
+        raise LLMClientError(f"Vision model {vision_model} returned an empty response.")
 
     def warm_up(
         self,
@@ -318,3 +327,73 @@ class LLMClient:
 
         text = str(content)
         return text.strip() if strip else text
+
+    def _extract_thinking(self, data: dict[str, Any]) -> str | None:
+        message_payload = data.get("message")
+        if isinstance(message_payload, dict):
+            thinking = message_payload.get("thinking")
+            if isinstance(thinking, str) and thinking.strip():
+                return thinking.strip()
+
+        root_thinking = data.get("thinking")
+        if isinstance(root_thinking, str) and root_thinking.strip():
+            return root_thinking.strip()
+        return None
+
+    def _recover_vision_response(self, prompt: str, thinking: str, *, vision_model: str) -> str:
+        summary_model = (self.settings.model or "").strip()
+        if summary_model and summary_model.lower() != vision_model.strip().lower():
+            try:
+                return self.chat(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ты превращаешь черновик анализа изображения в короткий итоговый ответ для пользователя. "
+                                "Не пересказывай внутренние рассуждения и отвечай только на русском языке."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Запрос пользователя:\n{prompt}\n\n"
+                                f"Черновик анализа изображения:\n{thinking}\n\n"
+                                "Сформируй только итоговый ответ: 1 краткое summary и до 4 коротких пунктов."
+                            ),
+                        },
+                    ],
+                    model=summary_model,
+                    stream=False,
+                    temperature_override=0.0,
+                )
+            except LLMClientError:
+                pass
+
+        return self._draft_visible_response_from_thinking(thinking)
+
+    def _draft_visible_response_from_thinking(self, thinking: str) -> str:
+        normalized = re.sub(r"\s+", " ", thinking).strip()
+        if not normalized:
+            return ""
+
+        meta_markers = (
+            "мне нужно",
+            "надо",
+            "сначала",
+            "начну",
+            "проверю",
+            "хорошо",
+            "i need",
+            "let me",
+            "first,",
+            "first ",
+        )
+        sentences = [item.strip(" -") for item in re.split(r"(?<=[.!?])\s+", normalized) if item.strip()]
+        visible_sentences = [
+            sentence
+            for sentence in sentences
+            if not any(marker in sentence.lower() for marker in meta_markers)
+        ]
+        selected = visible_sentences[:3] or sentences[:2]
+        drafted = " ".join(selected).strip()
+        return drafted[:400].rstrip(" ,;:")

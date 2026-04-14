@@ -24,6 +24,7 @@ class Settings:
     model: str = DEFAULT_CONTEST_MODEL
     localscript_model: str = DEFAULT_CONTEST_MODEL
     vision_model: str = DEFAULT_VISION_MODEL
+    first_run_model_scan_completed: bool = False
     api_url: str = os.getenv("ASSISTANT_API_URL", "http://127.0.0.1:11434/api/chat")
     temperature: float = 0.2
     localscript_temperature: float = 0.0

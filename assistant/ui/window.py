@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QAction, QActionGroup, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
@@ -58,6 +59,17 @@ from assistant.app import AssistantBackend, build_backend
 from assistant.config.settings import FIXED_CONTEXT_SIZE, FIXED_NUM_PREDICT, Settings
 from assistant.local_chat.window import LocalChatWindow
 from assistant.llm.client import LLMClientError
+from assistant.model_setup import (
+    InstalledOllamaModel,
+    ModelInventory,
+    ModelInstallProgress,
+    build_recommended_models,
+    delete_models_via_ollama,
+    discover_models_on_disk,
+    install_models_via_ollama,
+    list_installed_ollama_models,
+    parse_model_tags,
+)
 from assistant.models import AssistantResponse, utc_now_iso
 from .code_render import render_message_html
 
@@ -72,6 +84,30 @@ COLORS = {
     "text": "#e2e8f0",
     "muted": "#94a3b8",
 }
+
+
+def _format_size(value: int) -> str:
+    size = float(max(0, value))
+    units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    precision = 0 if unit_index == 0 else 1
+    return f"{size:.{precision}f} {units[unit_index]}"
+
+
+def _format_eta(seconds: float | None) -> str:
+    if seconds is None:
+        return "расчёт..."
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} ч {minutes} мин"
+    if minutes:
+        return f"{minutes} мин {secs} с"
+    return f"{secs} с"
 
 
 def _load_icon(path: Path, size: QSize) -> QIcon:
@@ -117,21 +153,17 @@ class AutoResizeTextEdit(QTextEdit):
         super().keyPressEvent(event)
 
     def update_height(self) -> None:
-        text = self.toPlainText()
-        line_count = max(1, text.count("\n") + 1)
-        if line_count <= 1:
-            self.setViewportMargins(0, 6, 0, 6)
-            self.setFixedHeight(self._min_height)
-            return
         top_inset = 6
         bottom_inset = 6
         self.setViewportMargins(0, top_inset, 0, bottom_inset)
-        visible_lines = min(max(1, line_count), 8)
-        line_height = QFontMetrics(self.font()).lineSpacing()
+        self.document().setTextWidth(max(0, self.viewport().width() - 2))
+        document_height = int(self.document().size().height())
         margins = self.contentsMargins().top() + self.contentsMargins().bottom()
         frame = self.frameWidth() * 2
-        new_height = int((visible_lines * line_height) + margins + frame + top_inset + bottom_inset + 8)
+        new_height = document_height + margins + frame + top_inset + bottom_inset + 8
         new_height = max(self._min_height, min(self._max_height, new_height))
+        fits_without_scroll = document_height + top_inset + bottom_inset <= self._max_height
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff if fits_without_scroll else Qt.ScrollBarAsNeeded)
         self.setFixedHeight(new_height)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
@@ -372,9 +404,16 @@ class ChatView(QWidget):
         self.messages_layout.addStretch(1)
         self._streaming_row: ChatRow | None = None
         self._thought_row: ChatRow | None = None
+        self._auto_follow_bottom = True
+        self._force_follow_bottom = False
+        self._ignore_scroll_events = False
+        self._pending_scroll = False
 
         self.scroll_area.setWidget(self.container)
         layout.addWidget(self.scroll_area)
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scrollbar.valueChanged.connect(self._on_scroll_value_changed)
+        scrollbar.rangeChanged.connect(self._on_scroll_range_changed)
 
     def clear_messages(self) -> None:
         while self.messages_layout.count() > 1:
@@ -384,11 +423,14 @@ class ChatView(QWidget):
                 widget.deleteLater()
         self._streaming_row = None
         self._thought_row = None
+        self._auto_follow_bottom = True
+        self._force_follow_bottom = False
+        self._pending_scroll = False
 
     def add_message(self, role: str, text: str) -> ChatRow:
         row = ChatRow(role=role, text=text)
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, row)
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self.request_scroll_to_bottom()
         return row
 
     def start_streaming_assistant_message(self) -> None:
@@ -396,14 +438,14 @@ class ChatView(QWidget):
             return
         self._streaming_row = ChatRow(role="assistant", text="")
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, self._streaming_row)
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self.request_scroll_to_bottom()
 
     def append_streaming_chunk(self, chunk: str) -> None:
         if self._streaming_row is None:
             self.start_streaming_assistant_message()
         if self._streaming_row is not None:
             self._streaming_row.append_text(chunk)
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self.request_scroll_to_bottom()
 
     def finish_streaming_message(self) -> ChatRow | None:
         if self._streaming_row is None:
@@ -425,7 +467,7 @@ class ChatView(QWidget):
             return
         self._thought_row = ChatRow(role="thought", text=text)
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, self._thought_row)
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self.request_scroll_to_bottom()
 
     def append_thought_line(self, line: str) -> None:
         cleaned = line.strip()
@@ -442,14 +484,43 @@ class ChatView(QWidget):
             return
         updated = current + ("\n" if current else "") + next_line
         self._thought_row.bubble.set_text(updated)
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self.request_scroll_to_bottom()
 
     def finish_thought_message(self) -> None:
         self._thought_row = None
 
+    def set_force_follow_bottom(self, enabled: bool) -> None:
+        self._force_follow_bottom = enabled
+        if enabled:
+            self._auto_follow_bottom = True
+            self.request_scroll_to_bottom()
+
+    def request_scroll_to_bottom(self) -> None:
+        if self._pending_scroll:
+            return
+        self._pending_scroll = True
+        QTimer.singleShot(0, self._flush_pending_scroll)
+
+    def _flush_pending_scroll(self) -> None:
+        self._pending_scroll = False
+        if self._force_follow_bottom or self._auto_follow_bottom:
+            self.scroll_to_bottom()
+
     def scroll_to_bottom(self) -> None:
         bar = self.scroll_area.verticalScrollBar()
+        self._ignore_scroll_events = True
         bar.setValue(bar.maximum())
+        self._ignore_scroll_events = False
+
+    def _on_scroll_value_changed(self, value: int) -> None:
+        if self._ignore_scroll_events or self._force_follow_bottom:
+            return
+        bar = self.scroll_area.verticalScrollBar()
+        self._auto_follow_bottom = value >= max(0, bar.maximum() - 24)
+
+    def _on_scroll_range_changed(self, _minimum: int, _maximum: int) -> None:
+        if self._force_follow_bottom or self._auto_follow_bottom:
+            self.request_scroll_to_bottom()
 
 
 class AssistantWorker(QThread):
@@ -485,16 +556,151 @@ class WarmupWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, backend: AssistantBackend) -> None:
+    def __init__(
+        self,
+        backend: AssistantBackend,
+        assistant_mode: str | None = None,
+        model_names: tuple[str, ...] | None = None,
+    ) -> None:
         super().__init__()
         self.backend = backend
+        self.assistant_mode = assistant_mode
+        self.model_names = model_names
 
     def run(self) -> None:  # type: ignore[override]
         try:
-            timings = self.backend.orchestrator.warm_up_models()
+            if self.model_names:
+                timings = self.backend.orchestrator.warm_up_specific_models(self.model_names)
+            else:
+                timings = self.backend.orchestrator.warm_up_models(self.assistant_mode)
             self.completed.emit(timings)
         except Exception as exc:  # pragma: no cover
             self.failed.emit(str(exc))
+
+
+class ModelDiscoveryWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__()
+        self.settings = settings
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            inventory = discover_models_on_disk(self.settings)
+            self.completed.emit(inventory)
+        except Exception as exc:  # pragma: no cover
+            self.failed.emit(str(exc))
+
+
+class ModelInstallWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+    progress = Signal(object)
+
+    def __init__(self, model_tags: list[str], settings: Settings) -> None:
+        super().__init__()
+        self.model_tags = list(model_tags)
+        self.settings = settings
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            installed_models = install_models_via_ollama(
+                self.model_tags,
+                api_url=self.settings.api_url,
+                request_timeout=self.settings.request_timeout,
+                on_status=self.status.emit,
+                on_progress=self.progress.emit,
+            )
+            self.completed.emit(installed_models)
+        except Exception as exc:  # pragma: no cover
+            self.failed.emit(str(exc))
+
+
+class ModelDeleteWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, model_tags: list[str], settings: Settings) -> None:
+        super().__init__()
+        self.model_tags = list(model_tags)
+        self.settings = settings
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            deleted_models = delete_models_via_ollama(
+                self.model_tags,
+                api_url=self.settings.api_url,
+                request_timeout=self.settings.request_timeout,
+                on_status=self.status.emit,
+            )
+            self.completed.emit(deleted_models)
+        except Exception as exc:  # pragma: no cover
+            self.failed.emit(str(exc))
+
+
+class ModelChooserDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        title: str,
+        description: str,
+        models: list[InstalledOllamaModel],
+        action_label: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(520, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        description_label = QLabel(description)
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+
+        self.models_list = QListWidget()
+        self.models_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        for model in models:
+            size_suffix = f" ({_format_size(model.size)})" if model.size > 0 else ""
+            item = QListWidgetItem(f"{model.name}{size_suffix}")
+            item.setData(Qt.UserRole, model.name)
+            self.models_list.addItem(item)
+        layout.addWidget(self.models_list, 1)
+
+        actions_layout = QHBoxLayout()
+        select_all_button = QPushButton("Выбрать все")
+        clear_button = QPushButton("Снять выбор")
+        actions_layout.addWidget(select_all_button)
+        actions_layout.addWidget(clear_button)
+        actions_layout.addStretch(1)
+        layout.addLayout(actions_layout)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch(1)
+        cancel_button = QPushButton("Отмена")
+        accept_button = QPushButton(action_label)
+        buttons_layout.addWidget(cancel_button)
+        buttons_layout.addWidget(accept_button)
+        layout.addLayout(buttons_layout)
+
+        select_all_button.clicked.connect(self.models_list.selectAll)
+        clear_button.clicked.connect(self.models_list.clearSelection)
+        cancel_button.clicked.connect(self.reject)
+        accept_button.clicked.connect(self.accept)
+
+    def selected_model_names(self) -> list[str]:
+        result: list[str] = []
+        for item in self.models_list.selectedItems():
+            model_name = str(item.data(Qt.UserRole) or "").strip()
+            if model_name:
+                result.append(model_name)
+        return result
 
 
 class SettingsDialog(QDialog):
@@ -534,10 +740,12 @@ class SettingsDialog(QDialog):
         connection_box = QGroupBox("Модель и подключение")
         connection_form = QFormLayout(connection_box)
         self.model_edit = QLineEdit(settings.model)
+        self.localscript_model_edit = QLineEdit(settings.localscript_model)
         self.vision_model_edit = QLineEdit(settings.vision_model)
         self.api_url_edit = QLineEdit(settings.api_url)
         self.search_root_edit = QLineEdit(settings.search_root)
         connection_form.addRow("Chat model", self.model_edit)
+        connection_form.addRow("LocalScript model", self.localscript_model_edit)
         connection_form.addRow("Vision model", self.vision_model_edit)
         connection_form.addRow("API URL", self.api_url_edit)
         connection_form.addRow("Search root", self.search_root_edit)
@@ -643,6 +851,7 @@ class SettingsDialog(QDialog):
 
     def _fill_form(self, settings: Settings) -> None:
         self.model_edit.setText(settings.model)
+        self.localscript_model_edit.setText(settings.localscript_model)
         self.vision_model_edit.setText(settings.vision_model)
         self.api_url_edit.setText(settings.api_url)
         self.search_root_edit.setText(settings.search_root)
@@ -678,6 +887,7 @@ class SettingsDialog(QDialog):
     def get_values(self) -> dict[str, object]:
         return {
             "model": self.model_edit.text().strip(),
+            "localscript_model": self.localscript_model_edit.text().strip(),
             "vision_model": self.vision_model_edit.text().strip(),
             "api_url": self.api_url_edit.text().strip(),
             "search_root": self.search_root_edit.text().strip() or ".",
@@ -705,7 +915,11 @@ class AssistantWindow(QMainWindow):
         self.backend = build_backend()
         self.worker: AssistantWorker | None = None
         self.warmup_worker: WarmupWorker | None = None
+        self.model_scan_worker: ModelDiscoveryWorker | None = None
+        self.model_install_worker: ModelInstallWorker | None = None
+        self.model_delete_worker: ModelDeleteWorker | None = None
         self.local_chat_window: LocalChatWindow | None = None
+        self.pending_install_warmup_models: list[str] | None = None
         self.last_assistant_message = ""
         self.feedback_path = self.backend.settings_manager.settings_path.parent / "feedback.log"
         self.runtime_log_path = self.backend.settings_manager.settings_path.parent / "app.log"
@@ -755,6 +969,7 @@ class AssistantWindow(QMainWindow):
         self._load_runtime_logs()
         self._apply_log_panel_visibility(self.backend.settings_manager.get_settings().show_logs)
         self._append_log("INFO", "Приложение запущено")
+        QTimer.singleShot(0, self._run_first_launch_model_scan)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -820,6 +1035,8 @@ class AssistantWindow(QMainWindow):
         self.image_button = QPushButton("Анализ изображения")
         self.local_chat_button = QPushButton("Локальный чат")
         self.settings_button = QPushButton("Настройки")
+        self.install_models_button = QPushButton("Скачать модели")
+        self.delete_models_button = QPushButton("Удалить модели")
         self.warmup_button = QPushButton("Прогреть модели")
 
         self.chats_card = QFrame()
@@ -832,6 +1049,8 @@ class AssistantWindow(QMainWindow):
         chats_card_layout.addWidget(self.image_button)
         chats_card_layout.addWidget(self.local_chat_button)
         chats_card_layout.addWidget(self.settings_button)
+        chats_card_layout.addWidget(self.install_models_button)
+        chats_card_layout.addWidget(self.delete_models_button)
         chats_card_layout.addWidget(self.warmup_button)
 
         sidebar_layout.addWidget(self.chats_header_widget, 0, Qt.AlignTop)
@@ -861,6 +1080,32 @@ class AssistantWindow(QMainWindow):
         top_bar.addWidget(self.status_label, 0, Qt.AlignLeft | Qt.AlignVCenter)
         top_bar.addStretch(1)
         top_bar.addWidget(self.response_time_label, 0, Qt.AlignVCenter)
+
+        self.model_install_card = QFrame()
+        self.model_install_card.setObjectName("modelInstallCard")
+        self.model_install_card.setVisible(False)
+        install_card_layout = QVBoxLayout(self.model_install_card)
+        install_card_layout.setContentsMargins(12, 12, 12, 12)
+        install_card_layout.setSpacing(6)
+        self.model_install_title_label = QLabel("")
+        self.model_install_title_label.setObjectName("topStatus")
+        self.model_install_title_label.setWordWrap(True)
+        self.model_install_queue_label = QLabel("")
+        self.model_install_queue_label.setObjectName("infoLabel")
+        self.model_install_queue_label.setWordWrap(True)
+        self.model_install_progress_bar = QProgressBar()
+        self.model_install_progress_bar.setObjectName("modelInstallProgressBar")
+        self.model_install_progress_bar.setTextVisible(True)
+        self.model_install_details_label = QLabel("")
+        self.model_install_details_label.setObjectName("infoLabel")
+        self.model_install_details_label.setWordWrap(True)
+        self.model_install_eta_label = QLabel("")
+        self.model_install_eta_label.setObjectName("infoLabel")
+        install_card_layout.addWidget(self.model_install_title_label)
+        install_card_layout.addWidget(self.model_install_queue_label)
+        install_card_layout.addWidget(self.model_install_progress_bar)
+        install_card_layout.addWidget(self.model_install_details_label)
+        install_card_layout.addWidget(self.model_install_eta_label)
 
         self.mode_bar = QFrame()
         self.mode_bar.setObjectName("modeBar")
@@ -1007,6 +1252,7 @@ class AssistantWindow(QMainWindow):
         self.main_splitter.setSizes([900, 340])
 
         content_layout.addLayout(top_bar)
+        content_layout.addWidget(self.model_install_card)
         content_layout.addWidget(self.main_splitter, 1)
 
         main_layout.addWidget(self.sidebar)
@@ -1016,6 +1262,8 @@ class AssistantWindow(QMainWindow):
         self.image_button.clicked.connect(self._analyze_image)
         self.local_chat_button.clicked.connect(self._open_local_chat_window)
         self.settings_button.clicked.connect(self._open_settings)
+        self.install_models_button.clicked.connect(self._prompt_manual_model_install)
+        self.delete_models_button.clicked.connect(self._prompt_model_delete)
         self.warmup_button.clicked.connect(self._warm_up_models)
         self.chats_collapse_button.clicked.connect(self._toggle_chats_sidebar)
         self.expand_sidebar_button.clicked.connect(self._toggle_chats_sidebar)
@@ -1266,6 +1514,23 @@ class AssistantWindow(QMainWindow):
                 color: {COLORS["muted"]};
                 font-size: 13px;
             }}
+            QFrame#modelInstallCard {{
+                background: {COLORS["bg_panel"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 14px;
+            }}
+            QProgressBar#modelInstallProgressBar {{
+                background: {COLORS["bg_block"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 10px;
+                min-height: 18px;
+                text-align: center;
+                color: {COLORS["text"]};
+            }}
+            QProgressBar#modelInstallProgressBar::chunk {{
+                background: #5978BF;
+                border-radius: 8px;
+            }}
             QLabel#dialogTitle {{
                 font-size: 20px;
                 font-weight: 700;
@@ -1294,6 +1559,7 @@ class AssistantWindow(QMainWindow):
             }}
             QTextEdit, QLineEdit, QPlainTextEdit, QListWidget, QSpinBox, QDoubleSpinBox {{
                 background: {COLORS["bg_block"]};
+                color: {COLORS["text"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 12px;
                 padding: 8px;
@@ -1441,7 +1707,9 @@ class AssistantWindow(QMainWindow):
         self.context_label.setText(
             f"Контекст: {stats['context_messages']} сообщений / {settings.memory_max_tokens} токенов"
         )
-        self.model_label.setText(f"Chat: {settings.model} | Vision: {settings.vision_model}")
+        self.model_label.setText(
+            f"Chat: {settings.model} | Lua: {settings.localscript_model} | Vision: {settings.vision_model}"
+        )
         self.status_label.setToolTip(
             f"Текущий чат: {session.title}\nРежим: {self._assistant_mode_title(session.assistant_mode)}"
         )
@@ -1460,6 +1728,342 @@ class AssistantWindow(QMainWindow):
         if assistant_mode == "agent":
             return "Работа с выбранной папкой проекта: анализ, создание и правка файлов"
         return "Генерация и доработка LocalScript / Lua"
+
+    def _run_first_launch_model_scan(self) -> None:
+        settings = self.backend.settings_manager.get_settings()
+        if settings.first_run_model_scan_completed:
+            return
+        if self.model_scan_worker is not None and self.model_scan_worker.isRunning():
+            return
+
+        self.status_label.setText("Проверяю локальные модели...")
+        self._append_log("INFO", "Первый запуск: начато сканирование локальных моделей")
+        self._set_controls_enabled(False)
+        self.model_scan_worker = ModelDiscoveryWorker(settings)
+        self.model_scan_worker.completed.connect(self._on_first_launch_model_scan_ready)
+        self.model_scan_worker.failed.connect(self._on_first_launch_model_scan_failed)
+        self.model_scan_worker.start()
+
+    def _on_first_launch_model_scan_ready(self, inventory: ModelInventory) -> None:
+        self.model_scan_worker = None
+        self.backend.settings_manager.update_settings(first_run_model_scan_completed=True)
+        self._append_log("INFO", "Первый запуск: сканирование моделей завершено", details=inventory.to_log_details())
+
+        if inventory.has_any_models:
+            names = inventory.model_names()
+            preview = ", ".join(names[:3])
+            suffix = "" if len(names) <= 3 else f" и ещё {len(names) - 3}"
+            self.status_label.setText("ИИ готов к работе")
+            self._append_log("OK", f"Найдены локальные модели: {preview}{suffix}")
+            self._set_controls_enabled(True)
+            return
+
+        self._prompt_model_install(inventory.recommended_models)
+
+    def _on_first_launch_model_scan_failed(self, error_text: str) -> None:
+        self.model_scan_worker = None
+        self.backend.settings_manager.update_settings(first_run_model_scan_completed=True)
+        self.status_label.setText("ИИ готов к работе")
+        self._append_log("ERR", "Не удалось проверить локальные модели при первом запуске", details=error_text)
+        self._set_controls_enabled(True)
+
+    def _prompt_model_install(self, model_tags: tuple[str, ...]) -> None:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setWindowTitle("Первый запуск")
+        dialog.setText("Локальные модели не найдены.")
+        dialog.setInformativeText(
+            "Приложение может сразу установить рекомендованные модели через Ollama:\n"
+            + "\n".join(f"• {tag}" for tag in model_tags)
+        )
+        install_button = dialog.addButton("Установить сейчас", QMessageBox.AcceptRole)
+        dialog.addButton("Позже", QMessageBox.RejectRole)
+        dialog.setDefaultButton(install_button)
+        dialog.exec()
+
+        if dialog.clickedButton() == install_button:
+            self._install_models(list(model_tags))
+            return
+
+        self.status_label.setText("Установка моделей отложена")
+        self._append_log("INFO", "Пользователь отложил установку рекомендованных моделей")
+        self._set_controls_enabled(True)
+
+    def _prompt_manual_model_install(self) -> None:
+        if self._is_busy():
+            QMessageBox.information(self, "Подождите", "Сначала дождитесь завершения текущей операции.")
+            return
+
+        suggested_tags = build_recommended_models(self.backend.settings_manager.get_settings())
+        raw_tags, ok = QInputDialog.getMultiLineText(
+            self,
+            "Скачать модели",
+            "Укажите теги Ollama по одному на строку или через запятую.",
+            "\n".join(suggested_tags),
+        )
+        if not ok:
+            return
+
+        model_tags = parse_model_tags(raw_tags)
+        if not model_tags:
+            QMessageBox.information(self, "Скачать модели", "Укажите хотя бы один тег модели.")
+            return
+
+        self._install_models(model_tags)
+
+    def _install_models(self, model_tags: list[str]) -> None:
+        if self.model_install_worker is not None and self.model_install_worker.isRunning():
+            return
+        if not model_tags:
+            return
+
+        settings = self.backend.settings_manager.get_settings()
+        already_installed: list[str] = []
+        try:
+            installed_models = list_installed_ollama_models(
+                settings.api_url,
+                request_timeout=settings.request_timeout,
+            )
+            installed_names = {item.name.strip().lower() for item in installed_models}
+            already_installed = [tag for tag in model_tags if tag.strip().lower() in installed_names]
+            model_tags = [tag for tag in model_tags if tag.strip().lower() not in installed_names]
+        except RuntimeError as exc:
+            self._append_log("WARN", "Не удалось заранее проверить список моделей", details=str(exc))
+
+        if already_installed and not model_tags:
+            message = "Данная модель уже установлена." if len(already_installed) == 1 else "Эти модели уже установлены."
+            self._append_log("INFO", message, details="\n".join(already_installed))
+            QMessageBox.information(self, "Скачать модели", message)
+            return
+
+        if already_installed:
+            self._append_log(
+                "INFO",
+                "Часть моделей уже установлена и будет пропущена",
+                details="\n".join(already_installed),
+            )
+            QMessageBox.information(
+                self,
+                "Скачать модели",
+                "Уже установлены и будут пропущены:\n\n" + "\n".join(already_installed),
+            )
+
+        if not model_tags:
+            return
+
+        self.status_label.setText("Устанавливаю модели...")
+        self._append_log(
+            "INFO",
+            "Запущена установка моделей",
+            details="\n".join(model_tags),
+        )
+        self._show_model_install_card(model_tags)
+        self._set_controls_enabled(False)
+        self.model_install_worker = ModelInstallWorker(model_tags, settings)
+        self.model_install_worker.status.connect(self._on_model_install_status)
+        self.model_install_worker.progress.connect(self._on_model_install_progress)
+        self.model_install_worker.completed.connect(self._on_model_install_ready)
+        self.model_install_worker.failed.connect(self._on_model_install_failed)
+        self.model_install_worker.start()
+
+    def _on_model_install_status(self, status_text: str) -> None:
+        self.status_label.setText(status_text)
+        self._append_log("INFO", status_text)
+
+    def _on_model_install_progress(self, progress: ModelInstallProgress) -> None:
+        self._update_model_install_card(progress)
+
+    def _on_model_install_ready(self, installed_models: list[str]) -> None:
+        self.model_install_worker = None
+        self._append_log(
+            "OK",
+            "Модели установлены",
+            details="\n".join(installed_models),
+        )
+        self._set_model_install_completed(installed_models)
+        warm_targets = self.backend.orchestrator.resolve_post_install_warm_up_models(installed_models)
+        if warm_targets:
+            self.pending_install_warmup_models = list(installed_models)
+            self.status_label.setText("Модели установлены, прогреваю используемые модели...")
+            self._append_log(
+                "INFO",
+                "После установки запущен автоматический прогрев используемых моделей",
+                details="\n".join(warm_targets),
+            )
+            self.warmup_worker = WarmupWorker(self.backend, model_names=tuple(warm_targets))
+            self.warmup_worker.completed.connect(self._on_warmup_ready)
+            self.warmup_worker.failed.connect(self._on_warmup_failed)
+            self.warmup_worker.start()
+            return
+
+        self.status_label.setText("Модели установлены")
+        self._set_controls_enabled(True)
+        QMessageBox.information(
+            self,
+            "Установка моделей",
+            "Установка завершена.\n\n" + "\n".join(installed_models),
+        )
+
+    def _on_model_install_failed(self, error_text: str) -> None:
+        self.model_install_worker = None
+        self.status_label.setText("Установка моделей не завершена")
+        self._append_log("ERR", "Не удалось установить модели", details=error_text)
+        self._set_model_install_failed(error_text)
+        self._set_controls_enabled(True)
+        QMessageBox.warning(self, "Установка моделей", error_text)
+
+    def _prompt_model_delete(self) -> None:
+        if self._is_busy():
+            QMessageBox.information(self, "Подождите", "Сначала дождитесь завершения текущей операции.")
+            return
+
+        settings = self.backend.settings_manager.get_settings()
+        try:
+            installed_models = list_installed_ollama_models(
+                settings.api_url,
+                request_timeout=settings.request_timeout,
+            )
+        except RuntimeError as exc:
+            QMessageBox.warning(self, "Удалить модели", str(exc))
+            return
+
+        if not installed_models:
+            QMessageBox.information(self, "Удалить модели", "Установленные модели не найдены.")
+            return
+
+        dialog = ModelChooserDialog(
+            title="Удалить модели",
+            description="Выберите одну или несколько моделей Ollama для удаления.",
+            models=installed_models,
+            action_label="Удалить",
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        model_tags = dialog.selected_model_names()
+        if not model_tags:
+            QMessageBox.information(self, "Удалить модели", "Выберите хотя бы одну модель.")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Удалить модели",
+            "Удалить выбранные модели?\n\n" + "\n".join(model_tags),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        self._delete_models(model_tags)
+
+    def _delete_models(self, model_tags: list[str]) -> None:
+        if self.model_delete_worker is not None and self.model_delete_worker.isRunning():
+            return
+
+        settings = self.backend.settings_manager.get_settings()
+        self.status_label.setText("Удаляю модели...")
+        self._append_log("INFO", "Запущено удаление моделей", details="\n".join(model_tags))
+        self._set_controls_enabled(False)
+        self.model_delete_worker = ModelDeleteWorker(model_tags, settings)
+        self.model_delete_worker.status.connect(self._on_model_delete_status)
+        self.model_delete_worker.completed.connect(self._on_model_delete_ready)
+        self.model_delete_worker.failed.connect(self._on_model_delete_failed)
+        self.model_delete_worker.start()
+
+    def _on_model_delete_status(self, status_text: str) -> None:
+        self.status_label.setText(status_text)
+        self._append_log("INFO", status_text)
+
+    def _on_model_delete_ready(self, deleted_models: list[str]) -> None:
+        self.model_delete_worker = None
+        self.status_label.setText("Модели удалены")
+        self._append_log("OK", "Модели удалены", details="\n".join(deleted_models))
+        self._set_controls_enabled(True)
+        QMessageBox.information(
+            self,
+            "Удалить модели",
+            "Удаление завершено.\n\n" + "\n".join(deleted_models),
+        )
+
+    def _on_model_delete_failed(self, error_text: str) -> None:
+        self.model_delete_worker = None
+        self.status_label.setText("Удаление моделей не завершено")
+        self._append_log("ERR", "Не удалось удалить модели", details=error_text)
+        self._set_controls_enabled(True)
+        QMessageBox.warning(self, "Удалить модели", error_text)
+
+    def _show_model_install_card(self, model_tags: list[str]) -> None:
+        self.model_install_card.setVisible(True)
+        self.model_install_title_label.setText("Установка моделей")
+        self.model_install_queue_label.setText("Очередь: " + ", ".join(model_tags))
+        self.model_install_progress_bar.setRange(0, 0)
+        self.model_install_progress_bar.setFormat("Подготовка...")
+        self.model_install_details_label.setText("Получаю данные о размерах и прогрессе загрузки...")
+        self.model_install_eta_label.setText("ETA: расчёт...")
+
+    def _update_model_install_card(self, progress: ModelInstallProgress) -> None:
+        self.model_install_card.setVisible(True)
+        self.model_install_title_label.setText(
+            f"Установка моделей ({progress.model_index}/{progress.model_count})"
+        )
+        queue_parts = []
+        for model_name in progress.selected_models:
+            if model_name == progress.current_model:
+                queue_parts.append(f"[{model_name}]")
+            else:
+                queue_parts.append(model_name)
+        self.model_install_queue_label.setText("Очередь: " + ", ".join(queue_parts))
+
+        ratio = progress.progress_ratio
+        if ratio is None:
+            self.model_install_progress_bar.setRange(0, 0)
+            self.model_install_progress_bar.setFormat("Получаю размер...")
+        else:
+            self.model_install_progress_bar.setRange(0, 1000)
+            self.model_install_progress_bar.setValue(int(ratio * 1000))
+            self.model_install_progress_bar.setFormat(f"{ratio * 100:.1f}%")
+
+        current_part = (
+            f"Сейчас: {progress.current_model}\n"
+            f"Скачано: {_format_size(progress.current_bytes)}"
+        )
+        if progress.current_total_bytes > 0:
+            current_part += f" из {_format_size(progress.current_total_bytes)}"
+
+        overall_part = f"Известный общий объём: {_format_size(progress.overall_downloaded_bytes)}"
+        if progress.overall_known_bytes > 0:
+            overall_part += f" из {_format_size(progress.overall_known_bytes)}"
+
+        self.model_install_details_label.setText(
+            current_part + "\n" + overall_part + "\n" + progress.status_text
+        )
+
+        pending_models = max(0, progress.model_count - progress.model_index)
+        eta_text = f"ETA текущей модели: {_format_eta(progress.eta_seconds)}"
+        if pending_models:
+            eta_text += f" | после неё в очереди ещё {pending_models}"
+        self.model_install_eta_label.setText(eta_text)
+
+    def _set_model_install_completed(self, installed_models: list[str]) -> None:
+        self.model_install_card.setVisible(True)
+        self.model_install_title_label.setText("Установка завершена")
+        self.model_install_queue_label.setText("Установлены: " + ", ".join(installed_models))
+        self.model_install_progress_bar.setRange(0, 1000)
+        self.model_install_progress_bar.setValue(1000)
+        self.model_install_progress_bar.setFormat("100%")
+        self.model_install_details_label.setText("Все выбранные модели успешно установлены.")
+        self.model_install_eta_label.setText("ETA: готово")
+
+    def _set_model_install_failed(self, error_text: str) -> None:
+        self.model_install_card.setVisible(True)
+        self.model_install_title_label.setText("Установка прервана")
+        self.model_install_progress_bar.setRange(0, 1)
+        self.model_install_progress_bar.setValue(0)
+        self.model_install_progress_bar.setFormat("ошибка")
+        self.model_install_details_label.setText(error_text)
+        self.model_install_eta_label.setText("ETA: недоступно")
 
     def _current_assistant_mode(self) -> str:
         return self.backend.memory_manager.get_active_session_mode()
@@ -1674,13 +2278,14 @@ class AssistantWindow(QMainWindow):
     def _send_prompt(self, prompt: str) -> None:
         if self._is_busy():
             self._append_log("WARN", "Попытка отправить новый запрос во время активной операции")
-            QMessageBox.information(self, "Подождите", "Предыдущий запрос ещё выполняется.")
+            self.status_label.setText("Предыдущий запрос ещё выполняется")
             return
 
         assistant_mode = self._current_assistant_mode()
         if assistant_mode == "agent" and not self._ensure_agent_workspace():
             return
         self.chat_view.add_message("user", prompt)
+        self.chat_view.set_force_follow_bottom(True)
         self.input_box.clear()
         self._set_random_input_placeholder()
         self.status_label.setText("Ожидаю ответ модели...")
@@ -1709,11 +2314,12 @@ class AssistantWindow(QMainWindow):
         assistant_row: ChatRow | None = None
         if self.stream_started:
             streamed_row = self.chat_view.finish_streaming_message()
-            streamed_text = streamed_row.plain_text() if streamed_row is not None else ""
-            if streamed_text.strip() and streamed_text.strip() != response.text.strip():
-                assistant_row = self.chat_view.add_message("assistant", response.text)
-            else:
+            if streamed_row is not None:
+                if streamed_row.plain_text() != response.text:
+                    streamed_row.bubble.set_text(response.text)
                 assistant_row = streamed_row
+            else:
+                assistant_row = self.chat_view.add_message("assistant", response.text)
         else:
             assistant_row = self.chat_view.add_message("assistant", response.text)
         self.stream_started = False
@@ -1736,6 +2342,8 @@ class AssistantWindow(QMainWindow):
         self.details_box.setPlainText(details)
         self._append_log("OK", f"Ответ получен за {duration:.2f} s", details=details)
         self.status_label.setText("ИИ готов к работе")
+        self.chat_view.set_force_follow_bottom(False)
+        self.chat_view.request_scroll_to_bottom()
         self._set_controls_enabled(True)
         self._refresh_sessions()
         self._refresh_runtime_labels()
@@ -1755,6 +2363,7 @@ class AssistantWindow(QMainWindow):
     def _on_response_failed(self, error_text: str) -> None:
         self.worker = None
         self.chat_view.abort_streaming_message()
+        self.chat_view.set_force_follow_bottom(False)
         self.stream_started = False
         self._append_agent_thought(f"Ошибка: {error_text}")
         self.chat_view.finish_thought_message()
@@ -1778,6 +2387,8 @@ class AssistantWindow(QMainWindow):
         self.new_chat_button.setEnabled(enabled)
         self.image_button.setEnabled(enabled)
         self.settings_button.setEnabled(enabled)
+        self.install_models_button.setEnabled(enabled)
+        self.delete_models_button.setEnabled(enabled)
         self.warmup_button.setEnabled(enabled)
         self.sessions_list.setEnabled(enabled)
         self.workspace_button.setEnabled(enabled and self._current_assistant_mode() == "agent")
@@ -1787,6 +2398,9 @@ class AssistantWindow(QMainWindow):
         return (
             (self.worker is not None and self.worker.isRunning())
             or (self.warmup_worker is not None and self.warmup_worker.isRunning())
+            or (self.model_scan_worker is not None and self.model_scan_worker.isRunning())
+            or (self.model_install_worker is not None and self.model_install_worker.isRunning())
+            or (self.model_delete_worker is not None and self.model_delete_worker.isRunning())
         )
 
     def _start_new_chat(self) -> None:
@@ -1931,8 +2545,8 @@ class AssistantWindow(QMainWindow):
             return
 
         values = dialog.get_values()
-        if not values["model"] or not values["vision_model"] or not values["api_url"]:
-            QMessageBox.warning(self, "Настройки", "Заполните model, vision model и API URL.")
+        if not values["model"] or not values["localscript_model"] or not values["vision_model"] or not values["api_url"]:
+            QMessageBox.warning(self, "Настройки", "Заполните chat model, LocalScript model, vision model и API URL.")
             return
 
         updated_settings = self.backend.settings_manager.update_settings(**values)
@@ -1985,25 +2599,62 @@ class AssistantWindow(QMainWindow):
             QMessageBox.information(self, "Подождите", "Сначала дождитесь завершения текущей операции.")
             return
 
-        self.status_label.setText("Прогреваю модели...")
-        self._append_log("INFO", "Запущен прогрев моделей")
+        warm_targets = self.backend.orchestrator.resolve_used_warm_up_models()
+        if not warm_targets:
+            QMessageBox.information(self, "Прогрев моделей", "Не найдено доступных используемых моделей для прогрева.")
+            return
+
+        self.status_label.setText("Прогреваю используемые модели...")
+        self._append_log(
+            "INFO",
+            "Запущен прогрев используемых моделей",
+            details="\n".join(warm_targets),
+        )
         self._set_controls_enabled(False)
-        self.warmup_worker = WarmupWorker(self.backend)
+        self.warmup_worker = WarmupWorker(self.backend, model_names=tuple(warm_targets))
         self.warmup_worker.completed.connect(self._on_warmup_ready)
         self.warmup_worker.failed.connect(self._on_warmup_failed)
         self.warmup_worker.start()
 
     def _on_warmup_ready(self, timings: dict[str, float]) -> None:
+        install_completion_models = self.pending_install_warmup_models
+        self.pending_install_warmup_models = None
         self.warmup_worker = None
         self._set_controls_enabled(True)
         summary = "\n".join(f"{model}: {seconds:.2f} s" for model, seconds in timings.items())
         self.details_box.setPlainText(f"Warm-up timings:\n{summary}")
+        if install_completion_models is not None:
+            self.status_label.setText("Модели установлены и прогреты")
+            self._append_log("OK", "Установка и прогрев завершены", details=summary)
+            QMessageBox.information(
+                self,
+                "Установка моделей",
+                "Установка и прогрев завершены.\n\n" + "\n".join(install_completion_models),
+            )
+            return
+
         self.status_label.setText("Модели прогреты")
         self._append_log("OK", "Модели прогреты", details=summary)
 
     def _on_warmup_failed(self, error_text: str) -> None:
+        install_completion_models = self.pending_install_warmup_models
+        self.pending_install_warmup_models = None
         self.warmup_worker = None
         self._set_controls_enabled(True)
+        if install_completion_models is not None:
+            self.status_label.setText("Модели установлены, но прогрев не завершился")
+            self._append_log(
+                "ERR",
+                "Модели установлены, но автоматический прогрев не удался",
+                details=error_text,
+            )
+            QMessageBox.warning(
+                self,
+                "Установка моделей",
+                "Модели установлены, но прогрев не завершился.\n\n" + error_text,
+            )
+            return
+
         self.status_label.setText("Ошибка прогрева")
         self._append_log("ERR", "Ошибка прогрева моделей", details=error_text)
         QMessageBox.critical(self, "Прогрев моделей", error_text)
@@ -2038,6 +2689,12 @@ class AssistantWindow(QMainWindow):
             self.worker.wait()
         if self.warmup_worker is not None and self.warmup_worker.isRunning():
             self.warmup_worker.wait()
+        if self.model_scan_worker is not None and self.model_scan_worker.isRunning():
+            self.model_scan_worker.wait()
+        if self.model_install_worker is not None and self.model_install_worker.isRunning():
+            self.model_install_worker.wait()
+        if self.model_delete_worker is not None and self.model_delete_worker.isRunning():
+            self.model_delete_worker.wait()
         super().closeEvent(event)
 
 

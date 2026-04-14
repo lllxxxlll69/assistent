@@ -26,6 +26,8 @@ CODE_START_RE = re.compile(
 RAW_ARRAY_RE = re.compile(r"\blocal\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{\s*\}")
 WF_REF_RE = re.compile(r"\bwf\.(vars|initVariables)\.([A-Za-z_][A-Za-z0-9_]*)")
 JSON_EMBEDDED_CODE_RE = re.compile(r"\b(return|local|function|wf\.)\b")
+DIRECT_STRING_RETURN_RE = re.compile(r'^\s*return\s+([\'"])(.*)\1\s*$', re.DOTALL)
+DIRECT_WF_RETURN_RE = re.compile(r"^\s*return\s+(wf\.(?:vars|initVariables)(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*$", re.DOTALL)
 
 LAST_MARKERS = ("последн", "last")
 INCREMENT_MARKERS = ("увелич", "increment", "счетчик", "counter")
@@ -57,6 +59,31 @@ TEMPLATE_MARKER_RE = re.compile(
     r"(?i)(insert(?: your)? code here|write(?: the)? code here|example code|sample code|boilerplate)"
 )
 NON_DETERMINISTIC_RE = re.compile(r"\bmath\.random(?:seed)?\b|\bRandom\.new\b")
+GENERIC_WORKFLOW_LEAVES = {"result", "value", "data", "item", "items", "payload", "response", "body", "list", "array"}
+DIRECT_PASSTHROUGH_MARKERS = ("как есть", "as is", "без изменений", "напрямую", "directly")
+TRANSFORMATION_HINTS = (
+    "обработ",
+    "очист",
+    "преобраз",
+    "конверт",
+    "сформ",
+    "собер",
+    "отфильтр",
+    "увелич",
+    "добав",
+    "измени",
+    "доработ",
+    "исправ",
+    "format",
+    "filter",
+    "increment",
+    "transform",
+    "convert",
+    "cleanup",
+    "build",
+    "normalize",
+    "parse",
+)
 
 
 @dataclass(slots=True)
@@ -202,6 +229,22 @@ class LocalScriptValidator:
             fail_check("must_return", "The judged result must return the computed value.")
         elif self._requires_return(lower_task, expects_json_result):
             pass_check("must_return")
+
+        if self._looks_like_explanatory_string_return(lower_task, normalized_code):
+            fail_check(
+                "natural_language_return",
+                "The result returns a natural-language explanation in quotes instead of executable LocalScript logic.",
+            )
+        else:
+            pass_check("natural_language_return")
+
+        if self._looks_like_lazy_generic_passthrough(lower_task, normalized_code):
+            fail_check(
+                "generic_passthrough",
+                "The result only returns a generic workflow field like wf.vars.result, but the task wording implies additional processing.",
+            )
+        else:
+            pass_check("generic_passthrough")
 
         if "print(" in normalized_code and not any(marker in lower_task for marker in PRINT_ALLOWED_MARKERS):
             fail_check("no_print_debug", "Use return, not print(), in judged LocalScript output.")
@@ -634,6 +677,71 @@ class LocalScriptValidator:
         if "помет" in lower_task and ("массив" in lower_task or "array" in lower_task):
             return True
         return False
+
+    def _looks_like_explanatory_string_return(self, lower_task: str, normalized_code: str) -> bool:
+        match = DIRECT_STRING_RETURN_RE.fullmatch(normalized_code.strip())
+        if match is None:
+            return False
+
+        literal = match.group(2).strip()
+        if not literal:
+            return False
+
+        literal_lower = literal.casefold()
+        literal_tokens = re.findall(r"[A-Za-zА-Яа-я0-9_]+", literal_lower)
+        if len(literal_tokens) < 5:
+            return False
+
+        explicit_string_request_markers = (
+            "верни строк",
+            "return string",
+            "literal string",
+            "текст ",
+            "text ",
+            "сообщени",
+            "message",
+            "статус",
+            "status",
+        )
+        if any(marker in lower_task for marker in explicit_string_request_markers):
+            return False
+
+        explanatory_markers = (
+            "я могу",
+            "я умею",
+            "i can",
+            "i'm able",
+            "workflow",
+            "localscript",
+            "lua",
+            "переменн",
+            "операц",
+            "операци",
+            "значени",
+            "значения",
+            "простые операции",
+            "can return",
+            "help",
+            "помочь",
+        )
+        looks_like_explanation = any(marker in literal_lower for marker in explanatory_markers)
+        looks_like_sentence = (" " in literal and literal[-1] in ".!?") or len(literal_tokens) >= 8
+        return looks_like_explanation and looks_like_sentence
+
+    def _looks_like_lazy_generic_passthrough(self, lower_task: str, normalized_code: str) -> bool:
+        match = DIRECT_WF_RETURN_RE.fullmatch(normalized_code.strip())
+        if match is None:
+            return False
+
+        path = match.group(1)
+        leaf = path.split(".")[-1].casefold()
+        if leaf not in GENERIC_WORKFLOW_LEAVES:
+            return False
+        if path.casefold() in lower_task:
+            return False
+        if any(marker in lower_task for marker in DIRECT_PASSTHROUGH_MARKERS):
+            return False
+        return any(marker in lower_task for marker in TRANSFORMATION_HINTS)
 
     def _looks_hardcoded(self, task_context: dict[str, Any] | None, normalized_code: str) -> bool:
         prompt_literals = self._extract_context_literals(task_context)

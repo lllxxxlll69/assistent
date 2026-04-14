@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from assistant.config.settings import SettingsManager
 from assistant.llm.client import LLMClient, LLMClientError
+from assistant.model_setup import list_installed_ollama_models
 from assistant.localscript.semantic_checks import (
     extract_json_context,
     extract_numeric_literals,
@@ -36,10 +37,8 @@ REFINEMENT_FEEDBACK_MARKERS = (
     "неверн",
     "ошиб",
     "не подходит",
-    "без ",
-    "without ",
-    "нужно ",
-    "должен ",
+    "передел",
+    "поправ",
 )
 JSON_RESULT_PHRASES = (
     "json payload",
@@ -71,6 +70,9 @@ ARRAY_FILTER_MARKERS = ("discount", "markdown", "parsedcsv")
 UNIX_TIME_MARKERS = ("recalltime", "unix", "timestamp")
 ISO_TIME_MARKERS = ("iso 8601", "yyyymmdd", "hhmmss", "datum")
 MAX_ASSUMPTIONS = 2
+EXPLICIT_WORKFLOW_PATH_RE = re.compile(r"wf\.(?:vars|initVariables)(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+DIRECT_PASSTHROUGH_MARKERS = ("как есть", "as is", "без изменений", "напрямую", "directly")
+GENERIC_WORKFLOW_LEAVES = {"result", "value", "data", "item", "items", "payload", "response", "body", "list", "array"}
 
 
 @dataclass(slots=True)
@@ -191,6 +193,13 @@ class LocalScriptService:
                 trace.append(GenerationTraceEntry(stage="assumed", status="applied", detail=assumption))
 
         settings = self.settings_manager.get_settings()
+        generation_model = self._resolve_generation_model(
+            settings,
+            interaction_mode=interaction_mode,
+            logs=logs,
+            trace=trace,
+        )
+        is_refinement_request = self._is_refinement_request(task)
         conversation_guidance = self._conversation_guidance(task, context_messages)
         if conversation_guidance:
             trace.append(
@@ -285,6 +294,7 @@ class LocalScriptService:
             context_messages=context_messages,
             assumptions=assumptions,
             settings=settings,
+            model_name=generation_model,
             conversation_guidance=conversation_guidance,
         )
         if context_repair_candidate is not None:
@@ -340,7 +350,11 @@ class LocalScriptService:
                     runtime_info=runtime_info,
                 )
 
-        labels = self._candidate_labels(task, settings.localscript_candidate_count, has_feedback=bool(conversation_guidance))
+        labels = self._candidate_labels(
+            task,
+            settings.localscript_candidate_count,
+            has_feedback=is_refinement_request,
+        )
         if context_repair_candidate is not None and settings.localscript_candidate_count <= 1:
             labels = []
         trace.append(GenerationTraceEntry(stage="llm_cycle_started", status="running", detail=f"candidate_count={len(labels)}"))
@@ -354,6 +368,7 @@ class LocalScriptService:
                 feedback_hints=feedback_hints,
                 conversation_guidance=conversation_guidance,
                 settings=settings,
+                model_name=generation_model,
             )
             candidate = self._build_candidate(
                 task=task,
@@ -407,6 +422,7 @@ class LocalScriptService:
                         assumptions=assumptions,
                         conversation_guidance=conversation_guidance,
                         settings=settings,
+                        model_name=generation_model,
                     )
                     repaired = self._build_candidate(
                         task=task,
@@ -459,6 +475,7 @@ class LocalScriptService:
                 assumptions=assumptions,
                 conversation_guidance=conversation_guidance,
                 settings=settings,
+                model_name=generation_model,
             )
             sandbox_repair = self._build_candidate(
                 task=task,
@@ -615,7 +632,7 @@ class LocalScriptService:
             if path:
                 return f"return {path} + 1"
         if family == "direct_return":
-            path = self._single_workflow_path(task)
+            path = self._requested_direct_return_path(task)
             if path:
                 return f"return {path}"
         if family == "datetime_unix":
@@ -624,12 +641,12 @@ class LocalScriptService:
             return self._build_symbolic_json_payload_candidate(task)
         return None
 
-    def _single_workflow_path(self, task: str) -> str | None:
+    def _single_workflow_path(self, task: str, *, allow_implicit_single: bool = True) -> str | None:
         context = self._extract_json_context(task)
         if not context:
             return None
         candidates = self._workflow_paths_from_context(context)
-        if len(candidates) == 1:
+        if len(candidates) == 1 and allow_implicit_single:
             return candidates[0]
         lowered = task.lower()
         exact_path_matches = [path for path in candidates if path.lower() in lowered]
@@ -642,6 +659,26 @@ class LocalScriptService:
             exact_leafs = {path.split(".")[-1] for path in exact_path_matches}
             if len(exact_leafs) == 1:
                 return sorted(exact_path_matches, key=len)[-1]
+        return None
+
+    def _requested_direct_return_path(self, task: str) -> str | None:
+        lowered = task.casefold()
+        explicit_paths = EXPLICIT_WORKFLOW_PATH_RE.findall(task)
+        if explicit_paths:
+            return sorted(set(explicit_paths), key=len)[-1]
+
+        allow_implicit_single = any(marker in lowered for marker in DIRECT_PASSTHROUGH_MARKERS)
+        path = self._single_workflow_path(task, allow_implicit_single=allow_implicit_single)
+        if path is None:
+            return None
+
+        leaf = path.split(".")[-1].casefold()
+        if leaf in GENERIC_WORKFLOW_LEAVES and not allow_implicit_single:
+            return None
+        if leaf in lowered:
+            return path
+        if allow_implicit_single:
+            return path
         return None
 
     def _build_symbolic_unix_time_candidate(self, task: str) -> str | None:
@@ -704,6 +741,7 @@ class LocalScriptService:
         feedback_hints: Sequence[str],
         conversation_guidance: Sequence[str],
         settings,
+        model_name: str,
     ) -> str:
         messages = self._build_generation_messages(
             task,
@@ -715,7 +753,7 @@ class LocalScriptService:
         )
         return self.llm_client.chat(
             messages,
-            model=settings.localscript_model,
+            model=model_name,
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
@@ -732,6 +770,7 @@ class LocalScriptService:
         assumptions: Sequence[str],
         conversation_guidance: Sequence[str],
         settings,
+        model_name: str,
     ) -> str:
         top_errors = validation.issues[:5]
         issues_text = "\n".join(f"- [{issue.rule}] {issue.message}" for issue in top_errors) or "- No issues."
@@ -776,7 +815,7 @@ class LocalScriptService:
         ]
         return self.llm_client.chat(
             messages,
-            model=settings.localscript_model,
+            model=model_name,
             stream=False,
             max_tokens_override=settings.localscript_num_predict,
             context_size_override=settings.localscript_context_size,
@@ -822,7 +861,7 @@ class LocalScriptService:
             ]
         )
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        messages.extend(self._context_messages(context_messages))
+        messages.extend(self._context_messages(context_messages, include_code_context=self._is_refinement_request(task)))
         messages.append(
             {
                 "role": "user",
@@ -837,10 +876,21 @@ class LocalScriptService:
         )
         return messages
 
-    def _context_messages(self, context_messages: Sequence[Message]) -> list[dict[str, str]]:
+    def _context_messages(
+        self,
+        context_messages: Sequence[Message],
+        *,
+        include_code_context: bool = True,
+    ) -> list[dict[str, str]]:
         relevant = list(context_messages[-6:])
         if relevant and relevant[-1].role == "user":
             relevant = relevant[:-1]
+        if not include_code_context:
+            relevant = [
+                item
+                for item in relevant
+                if not (item.role == "assistant" and self._looks_like_code(item.content))
+            ]
         return [{"role": item.role, "content": item.content} for item in relevant]
 
     def _strategy_prompt(self, strategy: str) -> str:
@@ -1050,21 +1100,71 @@ class LocalScriptService:
                 return message.content
         return None
 
-    def _should_use_context_repair(self, task: str, context_messages: Sequence[Message]) -> bool:
-        if not self._recent_assistant_code(context_messages):
-            return False
+    def _is_refinement_request(self, task: str) -> bool:
         lowered = task.casefold()
         if any(marker in lowered for marker in REFINE_MARKERS):
             return True
-        return any(
-            message.role == "user" and any(marker in message.content.casefold() for marker in REFINEMENT_FEEDBACK_MARKERS)
-            for message in context_messages[-4:]
+        return any(marker in lowered for marker in REFINEMENT_FEEDBACK_MARKERS)
+
+    def _should_use_context_repair(self, task: str, context_messages: Sequence[Message]) -> bool:
+        if not self._recent_assistant_code(context_messages):
+            return False
+        return self._is_refinement_request(task)
+
+    def _resolve_generation_model(
+        self,
+        settings,
+        *,
+        interaction_mode: Literal["interactive", "judged"],
+        logs: list[ActionLogEntry],
+        trace: list[GenerationTraceEntry],
+    ) -> str:
+        preferred_model = settings.localscript_model.strip()
+        fallback_model = settings.model.strip()
+
+        if interaction_mode != "interactive":
+            return preferred_model
+        if not preferred_model:
+            return fallback_model
+        if not fallback_model or preferred_model == fallback_model:
+            return preferred_model
+
+        try:
+            installed_models = list_installed_ollama_models(
+                settings.api_url,
+                request_timeout=settings.request_timeout,
+            )
+        except RuntimeError:
+            return preferred_model
+
+        installed_names = {item.name.strip().lower() for item in installed_models}
+        if preferred_model.lower() in installed_names:
+            return preferred_model
+        if fallback_model.lower() not in installed_names:
+            return preferred_model
+
+        logs.append(
+            ActionLogEntry(
+                message=(
+                    f"LocalScript model {preferred_model} не найдена в Ollama. "
+                    f"Для интерактивного режима использую {fallback_model}."
+                ),
+                success=False,
+            )
         )
+        trace.append(
+            GenerationTraceEntry(
+                stage="interactive_model_fallback",
+                status="applied",
+                detail=f"{preferred_model} -> {fallback_model}",
+            )
+        )
+        return fallback_model
 
     def _conversation_guidance(self, task: str, context_messages: Sequence[Message]) -> list[str]:
         guidance: list[str] = []
         lowered = task.casefold()
-        if self._recent_assistant_code(context_messages):
+        if self._is_refinement_request(task) and self._recent_assistant_code(context_messages):
             guidance.append("There is previous assistant code in the dialog; preserve working parts and patch only the mismatched behavior.")
         if "print(" in lowered or "без print" in lowered or "no print" in lowered:
             guidance.append("Do not use print() in the final judged answer.")
@@ -1072,13 +1172,6 @@ class LocalScriptService:
             guidance.append("Prefer wf.initVariables for the requested data path.")
         if any(phrase in lowered for phrase in JSON_RESULT_PHRASES):
             guidance.append("Return only the requested JSON payload fields and keep executable Lua values wrapped.")
-        for message in context_messages[-4:]:
-            if message.role != "user":
-                continue
-            feedback = message.content.strip()
-            feedback_lower = feedback.casefold()
-            if any(marker in feedback_lower for marker in REFINEMENT_FEEDBACK_MARKERS):
-                guidance.append("Latest user correction: " + feedback[:160])
         deduplicated: list[str] = []
         for item in guidance:
             if item not in deduplicated:
@@ -1092,6 +1185,7 @@ class LocalScriptService:
         context_messages: Sequence[Message],
         assumptions: Sequence[str],
         settings,
+        model_name: str,
         conversation_guidance: Sequence[str],
     ) -> _Candidate | None:
         if not self._should_use_context_repair(task, context_messages):
@@ -1108,6 +1202,7 @@ class LocalScriptService:
             assumptions=assumptions,
             conversation_guidance=conversation_guidance,
             settings=settings,
+            model_name=model_name,
         )
         return self._build_candidate(
             task=task,
@@ -1177,7 +1272,7 @@ class LocalScriptService:
             return "selection_last"
         if any(marker in lowered for marker in INCREMENT_MARKERS):
             return "increment"
-        if ("return" in lowered or "верни" in lowered) and ("wf.vars" in lowered or "wf.initvariables" in lowered or "{" in lowered):
+        if ("return" in lowered or "верни" in lowered) and self._requested_direct_return_path(task):
             return "direct_return"
         return "generic"
 
@@ -1188,7 +1283,8 @@ class LocalScriptService:
             "- Return executable LocalScript only.\n"
             "- Never use print() or debug output in judged mode.\n"
             "- Prefer return over side-effect-only code.\n"
-            "- Do not invent workflow keys that are absent from the prompt context."
+            "- Do not invent workflow keys that are absent from the prompt context.\n"
+            "- Never return a natural-language explanation wrapped in quotes."
         )
         family_contracts = {
             "selection_last": (

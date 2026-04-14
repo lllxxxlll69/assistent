@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from assistant.core.clarification import ClarificationHelper
 from assistant.llm.client import LLMClient
 from assistant.llm.prompts import build_auto_mode_prompt, build_chat_messages, build_system_prompt
 from assistant.localscript.service import LocalScriptService
+from assistant.model_setup import list_installed_ollama_models
 from assistant.memory.memory_manager import MemoryManager
 from assistant.models import (
     ActionLogEntry,
@@ -24,6 +26,48 @@ from assistant.project_agent.service import ProjectAgentService
 from assistant.tools.file_tools import FileTools
 from assistant.tools.search_tools import SearchTools
 from assistant.tools.vision_tools import VisionTools
+
+
+NATURAL_LANGUAGE_RETURN_RE = re.compile(r'^\s*return\s+([\'"])(.*)\1\s*$', re.DOTALL)
+
+
+def _unwrap_natural_language_return(text: str) -> str:
+    stripped = text.strip()
+    match = NATURAL_LANGUAGE_RETURN_RE.fullmatch(stripped)
+    if match is None:
+        return stripped
+
+    literal = match.group(2).strip()
+    if not literal:
+        return stripped
+
+    token_count = len(re.findall(r"[A-Za-zА-Яа-я0-9_]+", literal))
+    if token_count < 5:
+        return stripped
+
+    lowered = literal.casefold()
+    natural_markers = (
+        "я могу",
+        "я умею",
+        "могу помочь",
+        "информац",
+        "вопрос",
+        "контекст",
+        "код",
+        "задач",
+        "workflow",
+        "перемен",
+        "операци",
+        "i can",
+        "help",
+        "questions",
+        "context",
+        "tasks",
+    )
+    looks_like_sentence = (" " in literal and literal[-1] in ".!?") or token_count >= 8
+    if looks_like_sentence and any(marker in lowered for marker in natural_markers):
+        return literal
+    return stripped
 
 
 class Orchestrator:
@@ -109,7 +153,7 @@ class Orchestrator:
         if action.action_type == ActionType.ANALYZE_IMAGE and action.image_path:
             vision_result = await asyncio.to_thread(
                 self.vision_tools.analyze_image,
-                VisionRequest(image_path=action.image_path, prompt=user_input),
+                VisionRequest(image_path=action.image_path, prompt=action.response_text or user_input),
             )
             logs.append(ActionLogEntry(message=f"Analyzed image {action.image_path}"))
             logs[-1].message = f"Проанализировано изображение {action.image_path}"
@@ -345,12 +389,94 @@ class Orchestrator:
         answer = f"{plan}\n\nАвто-режим подготовлен, но для этой задачи пока нет встроенного исполнителя."
         return self._finalize_response(answer, logs)
 
-    def warm_up_models(self) -> dict[str, float]:
+    def warm_up_models(self, assistant_mode: str | None = None) -> dict[str, float]:
         settings = self.settings_manager.get_settings()
+        mode = (assistant_mode or settings.assistant_profile).strip().lower()
+        primary_model = self._resolve_warm_up_model(settings, mode)
+        return self.warm_up_specific_models([primary_model])
+
+    def warm_up_specific_models(self, model_names: Iterable[str]) -> dict[str, float]:
         timings: dict[str, float] = {}
-        for model_name in dict.fromkeys([settings.model, settings.vision_model]):
+        for model_name in dict.fromkeys(item.strip() for item in model_names if item and item.strip()):
             timings[model_name] = self.llm_client.warm_up(model_name)
         return timings
+
+    def resolve_used_warm_up_models(self, installed_model_names: Iterable[str] | None = None) -> list[str]:
+        settings = self.settings_manager.get_settings()
+        installed_lookup = self._build_installed_model_lookup(installed_model_names)
+        configured_models = [
+            (settings.model or "").strip(),
+            self._resolve_warm_up_model(settings, "localscript", installed_names=set(installed_lookup)),
+            (settings.vision_model or "").strip(),
+        ]
+        targets: list[str] = []
+        for model_name in configured_models:
+            normalized = (model_name or "").strip().lower()
+            if not normalized:
+                continue
+            if installed_lookup:
+                if normalized in installed_lookup:
+                    targets.append(installed_lookup[normalized])
+                continue
+            targets.append((model_name or "").strip())
+        return list(dict.fromkeys(targets))
+
+    def resolve_post_install_warm_up_models(self, installed_model_names: Iterable[str]) -> list[str]:
+        settings = self.settings_manager.get_settings()
+        fallback_names = [item for item in installed_model_names if item and item.strip()]
+        try:
+            installed_models = list_installed_ollama_models(
+                settings.api_url,
+                request_timeout=settings.request_timeout,
+            )
+        except RuntimeError:
+            return self.resolve_used_warm_up_models(fallback_names or None)
+        return self.resolve_used_warm_up_models([item.name for item in installed_models])
+
+    def _resolve_warm_up_model(self, settings, mode: str, installed_names: set[str] | None = None) -> str:
+        if mode != "localscript":
+            return settings.model
+
+        preferred_model = (settings.localscript_model or "").strip()
+        fallback_model = (settings.model or "").strip()
+        if not preferred_model:
+            return fallback_model
+        if not fallback_model or preferred_model == fallback_model:
+            return preferred_model
+
+        if installed_names is None:
+            try:
+                installed_models = list_installed_ollama_models(
+                    settings.api_url,
+                    request_timeout=settings.request_timeout,
+                )
+            except RuntimeError:
+                return preferred_model
+            installed_names = {item.name.strip().lower() for item in installed_models}
+
+        if preferred_model.lower() in installed_names:
+            return preferred_model
+        if fallback_model.lower() in installed_names:
+            return fallback_model
+        return preferred_model
+
+    def _build_installed_model_lookup(self, installed_model_names: Iterable[str] | None = None) -> dict[str, str]:
+        if installed_model_names is None:
+            settings = self.settings_manager.get_settings()
+            try:
+                installed_models = list_installed_ollama_models(
+                    settings.api_url,
+                    request_timeout=settings.request_timeout,
+                )
+            except RuntimeError:
+                return {}
+            installed_model_names = [item.name for item in installed_models]
+
+        return {
+            item.strip().lower(): item.strip()
+            for item in installed_model_names
+            if item and item.strip()
+        }
 
     def _finalize_response(
         self,
@@ -360,6 +486,7 @@ class Orchestrator:
         persist_memory: bool = True,
         extra_metrics: dict[str, Any] | None = None,
     ) -> AssistantResponse:
+        text = _unwrap_natural_language_return(text)
         if persist_memory:
             self.memory_manager.add_message("assistant", text)
         metrics = {
