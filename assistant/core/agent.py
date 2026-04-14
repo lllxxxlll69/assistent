@@ -22,7 +22,7 @@ class Agent:
                 action_type=ActionType.ANALYZE_IMAGE,
                 reason="Detected image analysis intent.",
                 image_path=image_path,
-                response_text=text,
+                response_text=self._strip_image_path(text, image_path) or "Что изображено на картинке?",
             )
 
         if match := re.match(r"^(?:create|создай)\s+folder\s+(.+)$", text, flags=re.IGNORECASE):
@@ -94,6 +94,10 @@ class Agent:
             re.IGNORECASE,
         )
         return match.group(1) if match else None
+
+    def _strip_image_path(self, text: str, image_path: str) -> str:
+        cleaned = text.replace(image_path, "", 1)
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     def _split_path_and_content(self, value: str) -> tuple[str, str | None]:
         marker = " content:"

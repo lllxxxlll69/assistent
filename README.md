@@ -109,6 +109,8 @@ The response contains:
 - `clarification_question`
 - `metrics`
 
+<<<<<<< ours
+=======
 Notable metrics include:
 
 - `selected_strategy`
@@ -116,6 +118,7 @@ Notable metrics include:
 - `sandbox_status`
 - `repair_attempts_used`
 
+>>>>>>> theirs
 If judged runtime constraints are violated, the API returns `503`.
 
 Iterative refinement is available through the same endpoint by passing `context_messages` and `allow_clarification=true`.
@@ -144,6 +147,14 @@ python -m assistant.localscript.self_check --full-eval
 The self-check verifies:
 
 - fixed judged parameters
+<<<<<<< ours
+- local runtime endpoint
+- compose limits for `parallel=1` and one loaded model
+- judged runtime guard enabled
+- full GPU requirement enabled
+- live Ollama runtime probe via `/api/version` and `/api/ps`
+- local syntax gate availability (`luac` or `luaparser`)
+=======
 - model tag consistency between generic and judged profiles
 - local runtime endpoint
 - compose limits for `parallel=1` and one loaded model
@@ -154,6 +165,7 @@ The self-check verifies:
 - local syntax gate availability (`luac` or `luaparser`)
 - deterministic execution probes for supported LocalScript task families
 - hidden-task sandbox probes for supported LocalScript task families
+>>>>>>> theirs
 - model digest presence
 - VRAM budget
 - knowledge/eval exact-overlap audit
@@ -187,8 +199,11 @@ The report now includes:
 - strategy distribution
 - `luac` status distribution
 - syntax-engine distribution
+<<<<<<< ours
+=======
 - execution-probe distribution
 - sandbox distribution
+>>>>>>> theirs
 - runtime-info presence
 - exact prompt-overlap audit between public knowledge examples and public eval cases
 - semantic overlap audit between public guidance cards and eval prompts
@@ -223,12 +238,17 @@ There is no external retrieval service in the judged contour.
 - `assistant/core/orchestrator.py`
 - `assistant/localscript/service.py`
 - `assistant/localscript/runtime.py`
+<<<<<<< ours
+- `assistant/localscript/validator.py`
+- `assistant/localscript/evaluator.py`
+=======
 - `assistant/localscript/semantic_checks.py`
 - `assistant/localscript/lua_sandbox.py`
 - `assistant/localscript/syntax_gate.py`
 - `assistant/localscript/validator.py`
 - `assistant/localscript/evaluator.py`
 - `assistant/localscript/e2e.py`
+>>>>>>> theirs
 - `assistant/localscript/self_check.py`
 - `docs/CONTEST_EVIDENCE.md`
 

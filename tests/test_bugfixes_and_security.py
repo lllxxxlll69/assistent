@@ -13,11 +13,12 @@ from assistant.config.settings import (
     Settings,
     SettingsManager,
 )
+from assistant.core.agent import Agent
 from assistant.llm.client import LLMClient
 from assistant.localscript.service import LocalScriptService
 from assistant.localscript.validator import LocalScriptValidator
 from assistant.memory.memory_manager import MemoryManager
-from assistant.models import Message
+from assistant.models import ActionType, Message
 from assistant.tools.file_tools import FileTools
 
 
@@ -135,6 +136,73 @@ class BugfixAndSecurityTests(unittest.TestCase):
 
         self.assertEqual("".join(chunks), "return\n  wf.vars.value")
         response.close.assert_called_once()
+
+    def test_vision_chat_recovers_answer_from_thinking_when_content_empty(self) -> None:
+        client = LLMClient(
+            Settings(
+                api_url="http://127.0.0.1:11434/api/chat",
+                model="qwen2.5-coder:3b",
+                vision_model="qwen3-vl:4b",
+            )
+        )
+        vision_response = Mock()
+        vision_response.status_code = 200
+        vision_response.json.return_value = {
+            "message": {
+                "content": "",
+                "thinking": (
+                    "Хорошо, мне нужно проанализировать изображение. "
+                    "Вижу чёрный квадратный контур и красный круг в центре."
+                ),
+            }
+        }
+        summary_response = Mock()
+        summary_response.status_code = 200
+        summary_response.json.return_value = {
+            "message": {"content": "На изображении чёрный квадратный контур с красным кругом в центре."}
+        }
+        client._session.post = Mock(side_effect=[vision_response, summary_response])  # type: ignore[method-assign]
+
+        result = client.vision_chat("Что на картинке?", image_base64="abc")
+
+        self.assertEqual(result, "На изображении чёрный квадратный контур с красным кругом в центре.")
+        self.assertEqual(client._session.post.call_count, 2)  # type: ignore[union-attr]
+        second_payload = client._session.post.call_args_list[1].kwargs["json"]  # type: ignore[union-attr]
+        self.assertEqual(second_payload["model"], "qwen2.5-coder:3b")
+
+    def test_vision_chat_uses_heuristic_fallback_when_summary_model_matches_vision(self) -> None:
+        client = LLMClient(
+            Settings(
+                api_url="http://127.0.0.1:11434/api/chat",
+                model="qwen3-vl:4b",
+                vision_model="qwen3-vl:4b",
+            )
+        )
+        vision_response = Mock()
+        vision_response.status_code = 200
+        vision_response.json.return_value = {
+            "message": {
+                "content": "",
+                "thinking": (
+                    "Хорошо, мне нужно разобрать картинку. "
+                    "Вижу чёрный квадрат и красный круг в центре. "
+                    "Это простой геометрический рисунок."
+                ),
+            }
+        }
+        client._session.post = Mock(return_value=vision_response)  # type: ignore[method-assign]
+
+        result = client.vision_chat("Что на картинке?", image_base64="abc")
+
+        self.assertIn("Вижу чёрный квадрат", result)
+        self.assertNotIn("мне нужно", result.lower())
+
+    def test_agent_strips_image_path_from_analysis_prompt(self) -> None:
+        action = Agent().decide("Что изображено на фото? C:\\tmp\\photo.png")
+
+        self.assertEqual(action.action_type, ActionType.ANALYZE_IMAGE)
+        self.assertEqual(action.image_path, "C:\\tmp\\photo.png")
+        self.assertEqual(action.response_text, "Что изображено на фото?")
 
     def test_llm_payload_carries_gpu_and_keepalive_runtime_options(self) -> None:
         client = LLMClient(
